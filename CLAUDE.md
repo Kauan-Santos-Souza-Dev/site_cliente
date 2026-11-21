@@ -43,7 +43,9 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 - **Django REST Framework** para a API somente de leitura de produtos e categorias.
 - **MySQL** acessado apenas pelo ORM do Django (Models e migrations). Sem SQL manual.
 - **Front-end:** templates do Django + CSS puro + JavaScript puro. Sem Bootstrap, Tailwind, jQuery ou bibliotecas de animação. (Exceção possível: o script oficial do gateway, se a tokenização de cartão exigir.)
-- **Gateway de pagamento:** *a decidir na v2 Etapa 1* (ver `DECISIONS.md`). Sempre começar no **sandbox**.
+- **Gateway de pagamento:** **Mercado Pago**: cartão pelo **Checkout Pro** (página do Mercado Pago) e Pix com QR dinâmico pela API (decisão 53). Sempre começar no **sandbox**.
+- **Senhas:** hash **Argon2** (`argon2-cffi`, decisão 63).
+- **E-mail:** backend de console em desenvolvimento; **Brevo** via SMTP em produção (decisão 62).
 - Dependências novas da v2 são propostas na Etapa 1 e instaladas só na etapa que as usa.
 
 ## Estrutura
@@ -74,7 +76,7 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 **Pedido**
 - O carrinho vira `Order` + `OrderItem` no banco, dentro de `transaction.atomic()`.
 - `OrderItem` guarda **o preço no momento da compra**.
-- `Order.shipping_cost` passa a ser usado na v2 (regra de frete: *a decidir na v2 Etapa 1*).
+- `Order.shipping_cost` passa a ser usado na v2 e guarda o frete calculado no momento da compra.
 
 **API (DRF)** — somente leitura, pública: listar categorias, listar produtos (filtro por categoria e destaques) e detalhar produto. Escrita só pelo Django Admin.
 
@@ -88,7 +90,20 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 3. **Parcelamento configurável no admin:** regra geral da loja (máximo de parcelas, valor mínimo da parcela, política de juros) e campo opcional no `Product` que **sobrescreve** a regra geral. Num carrinho com vários produtos, vale o **menor** limite entre os itens.
 4. **Pedido ligado à conta**, novos status com transições permitidas, **reserva de estoque com expiração** para pedidos não pagos, frete e página "Meus pedidos".
 
-Decisões de negócio pendentes (respondidas na v2 Etapa 1 e registradas em `DECISIONS.md`): gateway, frete, compra como visitante, juros do parcelamento, parcela mínima, expiração do Pix, CPF, troca e estorno.
+### Decisões de negócio da v2 (decisões 53 a 63 no `DECISIONS.md`)
+- **Frete:** tabela fixa por região/UF + frete grátis acima de um valor, **tudo editável no admin**, nenhum valor fixo no código. Os dados iniciais são exemplos **marcados como provisórios**. Melhor Envio/Correios fora da v2.
+- **Conta:** a visitante navega e monta o carrinho sem conta; a **conta é obrigatória só no checkout**. O carrinho sobrevive ao login **e** ao cadastro.
+- **Juros do parcelamento:** ainda não decididos pela dona. Ficam como **configuração** no `StoreSettings`; **perguntar o valor na v2 Etapa 6**. O "sem juros" do Mercado Pago é configurado na conta do gateway, e o site precisa ficar alinhado com ela.
+- **Parcelas:** padrão inicial **até 3x**, **parcela mínima R$ 50,00**, ambos editáveis no admin (máximo sobrescrevível por produto; no carrinho vale o menor).
+- **Pix:** expira em **30 minutos** (configurável); ao expirar, o pedido vira "expirado" e o estoque volta.
+- **CPF:** **não armazenar**. Se o Pix exigir, pedir no pagamento e enviar direto ao gateway. Confirmar no sandbox (v2 Etapa 7) e avisar o Kauan.
+- **Troca e estorno:** mínimo legal do CDC (art. 49): desistência em até 7 dias corridos após o recebimento, devolução integral (inclusive frete), frete de devolução por conta da loja. **Estorno total pelo admin.** Prazos além do legal e troca de tamanho são política a definir pela dona: textos como **rascunho marcado para revisão jurídica**.
+- **Admin:** só a dona acessa; **2FA obrigatório** para contas do admin.
+- **E-mail da loja:** ainda não confirmado (vale para o contato e para o remetente).
+
+### Dependências da v2
+- **Aprovadas:** `argon2-cffi`.
+- **Pedir aprovação na etapa em que forem usadas:** `django-axes` e `django-otp` + `qrcode` (Etapa 3), `mercadopago` (Etapa 7).
 
 ## Regras inegociáveis de segurança (v2)
 - **Dados de cartão NUNCA passam pelo nosso servidor**, nem em log. Usar checkout hospedado ou tokenização do gateway.

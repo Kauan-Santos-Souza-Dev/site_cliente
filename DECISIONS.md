@@ -14,7 +14,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | 6 | Carrinho na sessão | 35 a 40 |
 | 7 | Pedido, checkout e WhatsApp | 41 a 46 |
 | 8 | Testes, revisão de segurança e documentação | 47 a 50 |
-| v2 · 1 | Preparação da v2: versionamento e escolha do gateway | 51 e 52 |
+| v2 · 1 | Preparação da v2: versionamento, gateway e decisões de negócio | 51 a 63 |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -266,4 +266,71 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - **Asaas:** aceita CPF; Pix com tarifa fixa por cobrança (R$ 1,99 para pessoa física após os 3 primeiros meses); cartão ~R$ 0,49 + 2,99% a 3,99%, recebimento em 32 dias; webhook autenticado por **token fixo** no cabeçalho; **sem SDK Python oficial** (REST com `requests`); o cartão pela API envia os dados do cartão pelo nosso servidor, então seria preciso usar a fatura hospedada do Asaas.
   - **Efí:** aceita CPF; Pix 1,19%; SDK Python oficial (`efipay`); exige certificado `.p12`/`.pem` nas chamadas e **mTLS** no webhook (há o modo *skip-mTLS* com HMAC na URL), o que complica o desenvolvimento local com túnel; tarifas de cartão não publicadas.
   - **Pagar.me:** abertura de conta exige **CNPJ ou MEI** (Stone). **Eliminado** pelo critério 1.
-- **Recomendação:** Mercado Pago (detalhes na resposta da v2 Etapa 1). **A escolha é do Kauan/da loja** e será registrada numa decisão própria.
+- **Recomendação:** Mercado Pago. A escolha final está na decisão 53.
+
+> As decisões 53 a 63 são as respostas de negócio da loja às perguntas da v2 Etapa 1. Cada uma diz em que etapa será implementada.
+
+## 53. Gateway: Mercado Pago — v2 Etapa 1
+- **Escolha:** Mercado Pago. **Cartão pelo Checkout Pro** (a cliente digita o cartão na página do Mercado Pago) e **Pix pela API de pagamentos**, com QR Code dinâmico e "copia e cola" exibidos no nosso site. Começa no sandbox, com contas de teste.
+- **Por quê:** aceita pessoa física; o Checkout Pro tira o cartão do nosso servidor; o webhook vem assinado com HMAC; tem SDK Python oficial (decisão 52).
+- **Custo aceito:** é o mais caro no cartão. A taxa depende do prazo de recebimento escolhido na conta.
+- **Descartado:** Asaas (sem SDK Python, webhook com token fixo, cartão só pela fatura hospedada), Efí (mTLS no webhook) e Pagar.me (exige CNPJ).
+- **Implementação:** v2 Etapas 7 (Pix) e 8 (cartão). O SDK `mercadopago` será pedido para aprovação na Etapa 7.
+
+## 54. Frete por tabela de UF, com frete grátis acima de um valor — v2 Etapa 1
+- **Escolha:** o frete vem de uma **tabela por região/UF editável no admin**, com **frete grátis acima de um valor** também editável. Nenhum valor fica fixo no código. Os dados iniciais são **exemplos provisórios**, marcados assim no admin e no README, para a loja trocar.
+- **Por quê:** com pagamento online, "frete a combinar" não funciona: a cliente precisa pagar o total certo de uma vez. Uma tabela simples resolve sem depender de serviço externo.
+- **Descartado na v2:** Melhor Envio/Correios (integração externa, exige peso e medidas de cada peça).
+- **Implementação:** v2 Etapa 5. O valor calculado é gravado em `Order.shipping_cost` (campo que já existe desde a v1), para o pedido não mudar se a tabela mudar depois.
+
+## 55. Carrinho sem conta; conta obrigatória só no checkout — v2 Etapa 1
+- **Escolha:** a visitante navega e monta o carrinho sem conta. Para finalizar a compra, precisa entrar ou se cadastrar. O carrinho **sobrevive ao login e ao cadastro**.
+- **Por quê:** pedir a conta só no fim não afasta quem está só olhando. A conta no checkout liga o pedido a uma dona, o que permite "Meus pedidos" e o controle de acesso contra IDOR.
+- **Cuidado técnico:** no login, o Django troca a chave da sessão (`cycle_key`, proteção contra *session fixation*) mas **mantém os dados**, então o carrinho continua lá. Os testes da v2 Etapa 2 vão provar isso.
+- **Implementação:** v2 Etapa 2 (login e cadastro mantêm o carrinho) e Etapa 5 (checkout exige conta).
+
+## 56. Política de juros como configuração — v2 Etapa 1
+- **Escolha:** a dona ainda não decidiu se a loja absorve os juros ("sem juros") ou se a cliente paga. Por isso a política vira um campo do `StoreSettings`. O valor será perguntado na v2 Etapa 6.
+- **Atenção:** no Mercado Pago, o "sem juros" é configurado **na conta do gateway**, não pela API. O que o site mostra precisa bater com essa configuração. Isso vai num aviso no admin e no checklist do README.
+- **Implementação:** v2 Etapa 6.
+
+## 57. Até 3 parcelas, parcela mínima de R$ 50 — v2 Etapa 1
+- **Escolha:** valores iniciais da regra geral: **até 3x** e **parcela mínima de R$ 50,00**, ambos editáveis no admin (e o máximo pode ser sobrescrito por produto). Exemplo: num carrinho de R$ 120, a parcela mínima permite no máximo 2x (2 × R$ 60).
+- **Implementação:** v2 Etapa 6 (`StoreSettings` + função de cálculo). O máximo vai para o Checkout Pro na Etapa 8.
+
+## 58. Pix expira em 30 minutos e devolve o estoque — v2 Etapa 1
+- **Escolha:** a cobrança Pix expira em **30 minutos** (configurável). Quando expira, o pedido vira "expirado" e o estoque reservado volta.
+- **Por quê:** um pedido não pago prende peças que outra cliente poderia comprar. Trinta minutos dá tempo de abrir o app do banco sem segurar o estoque por muito tempo.
+- **Implementação:** v2 Etapa 5 (reserva e expiração) e Etapa 7 (data de expiração enviada ao Mercado Pago).
+
+## 59. CPF não é armazenado — v2 Etapa 1
+- **Escolha:** o site **não guarda CPF**. No cartão, o Checkout Pro pede o CPF na página do Mercado Pago. No Pix, se o Mercado Pago exigir o CPF do pagador, ele é pedido no momento do pagamento e enviado direto ao gateway, sem ir para o banco de dados nem para os logs.
+- **Por quê:** LGPD, princípio da necessidade: o CPF não serve para nada na loja. Dado que não guardamos não pode vazar.
+- **Pendente:** confirmar no sandbox se o Pix exige o CPF (v2 Etapa 7). O resultado será informado ao Kauan.
+
+## 60. Troca e estorno: mínimo legal + estorno total no admin — v2 Etapa 1
+- **Regra legal (CDC, art. 49):** na compra pela internet, a cliente pode desistir em até **7 dias corridos após receber** o produto, com devolução **integral** do valor pago (inclusive o frete). O frete de devolução é por conta da loja.
+- **Escolha técnica:** **estorno total** pelo admin, feito pela API do Mercado Pago. O pedido vira "estornado" e o estoque volta. Estorno parcial fica fora da v2.
+- **A definir pela dona:** prazos além do legal e troca de tamanho. Os textos (Termos de Uso, Política de Trocas) serão **rascunhos marcados para revisão jurídica**, sem texto definitivo inventado.
+- **Implementação:** v2 Etapa 4 (textos) e Etapa 8 (estorno).
+
+## 61. Admin só da dona, com 2FA obrigatório — v2 Etapa 1
+- **Escolha:** só a dona acessa o admin. Toda conta com acesso ao admin (`is_staff`) precisa de **autenticação em dois fatores** (código de um app autenticador no celular).
+- **Por quê:** o admin mostra nome, telefone e endereço das clientes e permite estornar pagamentos. Com 2FA, uma senha vazada sozinha não abre o painel.
+- **Grupos de permissão:** com uma única pessoa, um grupo "Loja" ainda é útil para separar a conta do dia a dia (sem ser superusuária) de uma conta técnica. A proposta detalhada vem na v2 Etapa 3.
+- **Implementação:** v2 Etapa 3. As dependências `django-otp` e `qrcode` serão pedidas para aprovação nessa etapa.
+
+## 62. E-mails pelo Brevo; console em desenvolvimento — v2 Etapa 1
+- **Escolha:** em produção, os e-mails (verificação, redefinição de senha) saem pelo **Brevo**, um serviço de e-mail transacional, via SMTP (o backend SMTP do Django já faz isso, sem dependência nova). Em desenvolvimento, `EMAIL_BACKEND` de **console**: o e-mail aparece no terminal.
+- **Por quê:** um serviço transacional entrega melhor (menos spam) que uma conta comum de Gmail, e as credenciais SMTP ficam no `.env`.
+- **Pendente:** o e-mail da loja ainda não foi confirmado. O remetente fica numa variável de ambiente.
+- **Implementação:** v2 Etapa 3.
+
+## 63. Senhas com Argon2 (hash, não criptografia) — v2 Etapa 1
+- **Escolha:** `PASSWORD_HASHERS` com `Argon2PasswordHasher` em primeiro lugar (dependência `argon2-cffi`, aprovada). Os outros hashers do Django ficam na lista só para conseguir ler senhas antigas, como a do superusuário da v1. No próximo login, o Django regrava a senha em Argon2.
+- **Hash x criptografia:**
+  - **Criptografia** é reversível: quem tem a chave volta ao texto original. Se a chave vazar junto com o banco, todas as senhas vazam.
+  - **Hash** é de mão única: não existe chave para "desfazer". No login, o Django calcula o hash da senha digitada e compara com o guardado. Cada senha tem um **sal** (valor aleatório) próprio, então duas pessoas com a mesma senha têm hashes diferentes, e tabelas prontas de hashes não funcionam.
+  - Por isso senha **nunca** é criptografada: ninguém, nem a loja, precisa ver a senha original.
+- **PBKDF2 x Argon2:** os dois são lentos de propósito (cada tentativa de adivinhação custa caro). O PBKDF2 (padrão do Django) gasta só tempo de CPU, e placas de vídeo testam milhões de senhas em paralelo. O Argon2 também gasta **memória**, o que torna esse ataque em paralelo muito mais caro. É o hasher recomendado pela documentação do Django.
+- **Implementação:** v2 Etapa 2.
