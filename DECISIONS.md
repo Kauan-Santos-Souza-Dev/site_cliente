@@ -15,6 +15,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | 7 | Pedido, checkout e WhatsApp | 41 a 46 |
 | 8 | Testes, revisão de segurança e documentação | 47 a 50 |
 | v2 · 1 | Preparação da v2: versionamento, gateway e decisões de negócio | 51 a 63 |
+| v2 · 2 | Usuário customizado e autenticação básica | 64 a 69 |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -334,3 +335,31 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - Por isso senha **nunca** é criptografada: ninguém, nem a loja, precisa ver a senha original.
 - **PBKDF2 x Argon2:** os dois são lentos de propósito (cada tentativa de adivinhação custa caro). O PBKDF2 (padrão do Django) gasta só tempo de CPU, e placas de vídeo testam milhões de senhas em paralelo. O Argon2 também gasta **memória**, o que torna esse ataque em paralelo muito mais caro. É o hasher recomendado pela documentação do Django.
 - **Implementação:** v2 Etapa 2.
+
+## 64. Usuário próprio com login por e-mail (`contas.User`) — v2 Etapa 2
+- **Escolha:** app `contas/` com `User(AbstractUser)` sem `username`, `email` único como `USERNAME_FIELD` e um `UserManager` que cria contas pelo e-mail. `AUTH_USER_MODEL = 'contas.User'`. Nome e sobrenome são os campos `first_name`/`last_name` do próprio Django.
+- **E-mail sempre em minúsculas, pelo código:** `UserManager.normalize_email` (strip + lower) é usado ao criar a conta, no `User.save()` (vale para site, admin e shell) e no `get_by_natural_key`, que o Django chama em **todo login** (site e admin). Não dependemos da *collation* do MySQL, que pode mudar de servidor para servidor. Há teste de login com e-mail em maiúsculas.
+- **Por quê agora:** o Django só permite trocar o modelo de usuário sem dor antes de existirem tabelas ligadas a ele. Por isso o banco de desenvolvimento foi **recriado** (só havia dados de exemplo; autorizado pelo Kauan). Receita no README.
+- **Descartado:** `AbstractBaseUser` (teríamos de reescrever permissões e campos que o `AbstractUser` já tem); campo único "nome completo" (exigiria reescrever o admin e os métodos de nome do Django).
+- **Regra para o código:** nunca importar `django.contrib.auth.models.User`. Use `get_user_model()` (ou `settings.AUTH_USER_MODEL` em `ForeignKey`).
+
+## 65. Login e logout com as views do Django — v2 Etapa 2
+- **Escolha:** `/conta/entrar/` e `/conta/sair/` usam `LoginView` e `LogoutView` do próprio Django, só configurados em `contas/urls.py`. O cadastro (`/conta/cadastro/`) é uma view em função nossa.
+- **Por quê (exceção à decisão 20):** em autenticação, código pronto e revisado por muita gente é mais seguro que código novo. Essas views já validam o `next` contra *open redirect*, trocam o código da sessão no login e, no logout, só aceitam **POST** (um link ou `<img>` em outro site não consegue deslogar a cliente).
+- **Open redirect no cadastro:** `contas/views.py::get_safe_next_url` usa `url_has_allowed_host_and_scheme`, a mesma verificação do `LoginView`. Um link `?next=https://site-falso` cai na página inicial.
+
+## 66. Mensagens que não revelam e-mail no login; risco aceito no cadastro — v2 Etapa 2
+- **Login:** a mesma frase ("E-mail ou senha incorretos...") para e-mail inexistente e senha errada (`contas/forms.py::LoginForm`). Assim ninguém descobre quem é cliente testando e-mails (**enumeração**). Há teste comparando as duas respostas.
+- **Cadastro (risco aceito temporariamente):** "Já existe uma conta com este e-mail" revela que o e-mail existe. A forma segura (responder sempre "enviamos um e-mail para confirmar") depende da verificação de e-mail da **v2 Etapa 3**, quando esta mensagem será trocada.
+
+## 67. Carrinho no login (mantido) e no logout (apagado) — v2 Etapa 2
+- **Login e cadastro:** `django.contrib.auth.login()` chama `cycle_key()`: gera um **código de sessão novo**, mas **copia os dados**, então o carrinho continua. O código novo protege contra *session fixation* (alguém que plantou ou conhecia o código antigo não "herda" a conta logada). Testado.
+- **Logout:** `logout()` chama `flush()`, que apaga a sessão inteira, inclusive o carrinho. Decisão do Kauan: protege quem usa computador compartilhado.
+
+## 68. Senha com no mínimo 10 caracteres — v2 Etapa 2
+- **Escolha:** `MinimumLengthValidator` com `min_length: 10` (o padrão do Django é 8), mais os validadores padrão: parecida com nome/e-mail, lista de senhas comuns, só números. Vale para o site, o admin e o `createsuperuser`.
+- **Por quê:** o tamanho é o fator que mais aumenta o número de tentativas necessárias para adivinhar uma senha. Exigir símbolos e maiúsculas, em vez disso, costuma gerar senhas previsíveis ("Senha@123").
+
+## 69. O site NÃO deve ser publicado antes da v2 Etapa 3 — v2 Etapa 2
+- **Situação ao fim da Etapa 2:** (1) o login do site e do admin **não bloqueia tentativas repetidas** (força bruta), e (2) o cadastro **revela se um e-mail está cadastrado** (decisão 66).
+- **Consequência:** a branch `v2` serve só para desenvolvimento até a v2 Etapa 3 resolver os dois pontos (bloqueio de tentativas e cadastro com resposta genérica + verificação de e-mail). O checklist do README repete o aviso.

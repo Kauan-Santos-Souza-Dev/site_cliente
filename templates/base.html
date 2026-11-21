@@ -54,6 +54,23 @@
               {% endif %}
             </a>
           </li>
+          {% comment %}
+            "user" vem do context processor de autenticação do Django.
+            Para quem está logado: saudação + botão "Sair". O logout é um
+            formulário POST com CSRF (o LogoutView não aceita GET), para que
+            um link em outro site não consiga deslogar a cliente.
+          {% endcomment %}
+          {% if user.is_authenticated %}
+            <li class="menu__conta">
+              <span class="menu__saudacao">Olá, {{ user.first_name|default:user.email }}</span>
+              <form class="menu__sair" method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="menu__link menu__botao" type="submit">Sair</button>
+              </form>
+            </li>
+          {% else %}
+            <li><a class="menu__link" href="{% url 'login' %}"{% if atual == 'login' or atual == 'signup' %} aria-current="page"{% endif %}>Entrar</a></li>
+          {% endif %}
         </ul>
         {% endwith %}
       </nav>

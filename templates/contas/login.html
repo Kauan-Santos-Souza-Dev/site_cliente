@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% comment %}
+  Login (view LoginView do Django, configurada em contas/urls.py).
+  O Django entrega: form (LoginForm) e next (para onde voltar depois de entrar).
+{% endcomment %}
+
+{% block title %}Entrar — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta">
+    <h1 class="secao__titulo">Entrar</h1>
+
+    <form class="conta__form" method="post" novalidate>
+      {% csrf_token %}
+      {# Erro geral (e-mail ou senha incorretos): a mesma frase nos dois casos. #}
+      {% if form.non_field_errors %}
+        <div class="mensagem mensagem--error" role="alert">{{ form.non_field_errors|join:" " }}</div>
+      {% endif %}
+
+      {% include 'pedidos/_campo.html' with field=form.username %}
+      {% include 'pedidos/_campo.html' with field=form.password %}
+
+      {# O "next" viaja escondido no formulário. O LoginView confere se é deste site antes de usar. #}
+      <input type="hidden" name="next" value="{{ next }}">
+      <button class="botao botao--largo" type="submit">Entrar</button>
+    </form>
+
+    <p class="conta__alternativa">
+      Ainda não tem conta?
+      <a href="{% url 'signup' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Cadastre-se</a>
+    </p>
+  </div>
+</section>
+{% endblock %}

@@ -4,7 +4,8 @@ Site de uma loja de roupas femininas (vestidos, saias e conjuntos) com temática
 Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, Django e Django REST Framework.
 
 > Status: **v1 concluída** (etapas 1 a 8, tag `v1.0`). **v2 em desenvolvimento** na branch `v2`
-> (pagamento online, contas de clientes e parcelamento): etapa 1 de 9 concluída.
+> (pagamento online, contas de clientes e parcelamento): etapas 1 e 2 de 9 concluídas.
+> ⚠️ **Não publique a v2 antes da etapa 3** (ainda sem bloqueio de tentativas de login; decisão 69).
 > O roteiro completo está no [CLAUDE.md](CLAUDE.md) e as decisões técnicas em [DECISIONS.md](DECISIONS.md).
 
 ## Versões
@@ -57,6 +58,20 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
    python manage.py carregar_exemplos
    ```
    Preços e estoques são fictícios; ajuste no admin. Pode rodar de novo sem duplicar.
+7. **Criar a conta de administração** (agora o login é pelo **e-mail**):
+   ```powershell
+   python manage.py createsuperuser
+   ```
+   O comando pede e-mail e senha (mínimo de 10 caracteres).
+
+### Recriar o banco de desenvolvimento
+Necessário uma vez, ao passar da v1 para a v2: a troca do modelo de usuário (v2 etapa 2, decisão 64)
+não funciona num banco que já tem as tabelas da v1. **Apaga todos os dados**, use só em desenvolvimento.
+```sql
+DROP DATABASE elegancia_crista;
+CREATE DATABASE elegancia_crista CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+Depois: `python manage.py migrate`, `python manage.py carregar_exemplos` e `python manage.py createsuperuser`.
 
 ## Variáveis de ambiente
 | Variável | Para que serve |
@@ -73,6 +88,12 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
 ```
 PROJETO/
 ├── config/          # settings, urls, wsgi (configuração do projeto)
+├── contas/          # (v2) usuário próprio com login por e-mail, cadastro, login, logout
+│   ├── models.py      # User (sem username) e UserManager (e-mail em minúsculas)
+│   ├── forms.py       # SignupForm, LoginForm e formulários do admin
+│   ├── views.py       # signup + get_safe_next_url (contra open redirect)
+│   ├── urls.py        # /conta/entrar/, /conta/sair/ (views do Django), /conta/cadastro/
+│   └── admin.py       # admin de usuários adaptado ao e-mail
 ├── loja/            # catálogo: models, views, urls, admin, validadores, testes
 │   ├── serializers.py # API: models → JSON
 │   ├── api_views.py   # API: endpoints de leitura
@@ -97,6 +118,7 @@ PROJETO/
 │   ├── loja/          # home, catalog, product_detail, about, contact, privacy
 │   │                  # e _product_card.html (cartão reutilizado)
 │   ├── carrinho/      # cart_detail.html
+│   ├── contas/        # login.html e signup.html
 │   └── pedidos/       # checkout, confirmation e _campo.html (campo com rótulo e erro)
 ├── static/
 │   ├── css/style.css  # todo o visual do site
@@ -238,6 +260,29 @@ Exemplo (`/api/produtos/vestido-helena/`, resumido):
 - Só dá para apagar pedido cancelado ou enviado (apagar um pedido novo sumiria com as peças reservadas).
 - O campo *frete* existe, mas fica vazio na v1 (frete a combinar).
 
+### Contas (app `contas/`) — v2 etapa 2
+| Endereço | View | O que faz |
+|---|---|---|
+| `/conta/cadastro/` | `contas.views.signup` | Cria a conta (nome, sobrenome, e-mail, senha) e já entra |
+| `/conta/entrar/` | `LoginView` do Django + `LoginForm` | Login por e-mail e senha |
+| `/conta/sair/` | `LogoutView` do Django | Sai da conta (só por POST, pelo botão "Sair" do menu) |
+
+**Caminho de um cadastro:**
+```
+POST /conta/cadastro/  →  config/urls.py ('conta/')  →  contas/urls.py ('cadastro/')
+  →  contas/views.py::signup
+       SignupForm (contas/forms.py): nome e sobrenome obrigatórios, e-mail em minúsculas e único,
+                                     senha conferida pelos AUTH_PASSWORD_VALIDATORS
+       form.save()  →  contas/models.py::User  (senha vira hash Argon2 com set_password)
+       login(request, user)  →  sessão ganha código novo, carrinho mantido
+  →  redirect para o "next" (se for deste site) ou para a página inicial
+```
+- O e-mail é sempre guardado e procurado **em minúsculas** (`UserManager`): "Maria@X.com" entra na conta "maria@x.com".
+- Login errado mostra sempre "E-mail ou senha incorretos", exista o e-mail ou não.
+- **Carrinho:** montado como visitante, continua depois do login e do cadastro; é apagado no logout.
+- **Admin → Contas → Usuários:** lista com e-mail, nome, ativo, equipe e data de cadastro; busca por e-mail ou nome.
+- Ainda não existe: verificação de e-mail, "esqueci a senha" e bloqueio de tentativas (etapa 3); pedido ligado à conta (etapa 5).
+
 ## Testes
 Rode todos os testes (o Django cria um banco de testes temporário e apaga no fim):
 ```powershell
@@ -250,6 +295,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
 | `pedidos/tests.py` | Checkout cria pedido e itens, preço guardado, estoque descontado, cancelamento devolve estoque, mensagem do WhatsApp, admin de pedidos, limite por IP, CSRF |
+| `contas/tests.py` | Senha em Argon2, e-mail em minúsculas (no cadastro e no login), nome obrigatório, senhas fracas, mesma mensagem para e-mail inexistente e senha errada, carrinho após login e cadastro, logout só por POST, `next` externo ignorado, admin de usuários |
 
 ## Segurança
 | Proteção | Onde |
@@ -264,6 +310,10 @@ Ou só os de um app: `python manage.py test pedidos`.
 | Confirmação do pedido sem número na URL (vem da sessão) | `pedidos/views.py` |
 | Limite de 5 pedidos por hora por IP | `pedidos/rate_limit.py` |
 | LGPD: só os dados necessários, aviso no checkout, página de Privacidade | `templates/pedidos/checkout.html`, `templates/loja/privacy.html` |
+| Senhas com hash Argon2 e mínimo de 10 caracteres | `PASSWORD_HASHERS` e `AUTH_PASSWORD_VALIDATORS` em `config/settings.py` |
+| Login não revela se o e-mail existe (enumeração) | `contas/forms.py::LoginForm` |
+| Código da sessão trocado no login (*session fixation*); logout só por POST | `LoginView`/`LogoutView` do Django, `contas/urls.py` |
+| `next` só para páginas do próprio site (*open redirect*) | `contas/views.py::get_safe_next_url`, `LoginView` |
 
 ## Checklist antes de publicar
 - [ ] Gerar uma **nova `SECRET_KEY`** para produção (nunca reaproveitar a de desenvolvimento).
@@ -272,7 +322,8 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] Senha do MySQL forte e diferente da de desenvolvimento.
 - [ ] `python manage.py migrate` e `python manage.py collectstatic` (copia os estáticos para `staticfiles/`, que o servidor web serve, junto com `media/`).
 - [ ] `python manage.py check --deploy`: devem sobrar só os avisos `W005` e `W021` (HSTS em subdomínios e *preload*), desligados de propósito (veja DECISIONS.md, decisão 48).
-- [ ] Criar a conta da dona com `createsuperuser` e **senha forte**. O admin não tem bloqueio após várias senhas erradas.
+- [ ] **v2: não publicar antes da etapa 3** (bloqueio de tentativas de login e cadastro sem revelar e-mail; decisão 69).
+- [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**. O admin não tem bloqueio após várias senhas erradas.
 - [ ] Depois de alguns dias com o HTTPS funcionando, aumentar `SECURE_HSTS_SECONDS` (ex.: `31536000`, 1 ano).
 - [ ] Se houver proxy (Nginx, Cloudflare...), configurar o IP real da visitante. Sem isso, o limite de pedidos trataria todas as clientes como um único IP.
 - [ ] Rodar `python manage.py test` uma última vez.

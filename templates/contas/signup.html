@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{# Cadastro da cliente (view contas.views.signup). #}
+
+{% block title %}Criar conta — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta">
+    <h1 class="secao__titulo">Criar conta</h1>
+
+    <form class="conta__form" method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="mensagem mensagem--error" role="alert">{{ form.non_field_errors|join:" " }}</div>
+      {% endif %}
+
+      <div class="checkout__linha">
+        {% include 'pedidos/_campo.html' with field=form.first_name %}
+        {% include 'pedidos/_campo.html' with field=form.last_name %}
+      </div>
+      {% include 'pedidos/_campo.html' with field=form.email %}
+      {% include 'pedidos/_campo.html' with field=form.password1 %}
+      <p class="campo__dica">Use pelo menos 10 caracteres. Evite senhas óbvias ou parecidas com seu nome ou e-mail.</p>
+      {% include 'pedidos/_campo.html' with field=form.password2 %}
+
+      <input type="hidden" name="next" value="{{ next }}">
+      <button class="botao botao--largo" type="submit">Criar conta</button>
+    </form>
+
+    <p class="conta__alternativa">
+      Já tem conta?
+      <a href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Entrar</a>
+    </p>
+  </div>
+</section>
+{% endblock %}

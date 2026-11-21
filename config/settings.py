@@ -78,6 +78,8 @@ if SECURE_HTTPS:
 # ---------------------------------------------------------------------------
 
 INSTALLED_APPS = [
+    # Contas de clientes (v2): vem primeiro porque define o modelo de usuário.
+    'contas',
     'loja',
     'carrinho',
     'pedidos',
@@ -147,15 +149,46 @@ DATABASES = {
 
 
 # ---------------------------------------------------------------------------
-# Validação de senhas (usada pelo admin)
+# Contas: modelo de usuário, senhas e login (v2 Etapa 2)
 # ---------------------------------------------------------------------------
 
+# Diz ao Django para usar o NOSSO modelo de usuário (contas/models.py, login
+# por e-mail) no lugar do User padrão. Tudo que fala de "usuário" (login,
+# admin, permissões) passa a usar este modelo. Decisão 64.
+AUTH_USER_MODEL = 'contas.User'
+
+# Como as senhas viram hash (decisão 63). O PRIMEIRO da lista é usado para
+# senhas novas: Argon2, que exige muita memória por tentativa e encarece
+# ataques com placa de vídeo. Os outros ficam só para conseguir CONFERIR
+# hashes antigos; no próximo login, o Django regrava a senha em Argon2.
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.ScryptPasswordHasher',
+]
+
+# Regras de senha (cadastro do site, admin e createsuperuser):
 AUTH_PASSWORD_VALIDATORS = [
+    # Recusa senha parecida com o e-mail ou o nome.
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    # Mínimo de 10 caracteres (o padrão é 8). Tamanho é o que mais dificulta
+    # adivinhar uma senha (decisão 68).
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {'min_length': 10},
+    },
+    # Recusa senhas de uma lista com milhares das mais usadas ("12345678"...).
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    # Recusa senha só de números.
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
+# Para onde mandar quem precisa entrar (ex.: @login_required) e para onde ir
+# depois de entrar ou sair. Aceitam o "name" de uma rota.
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'home'
+LOGOUT_REDIRECT_URL = 'home'
 
 
 # ---------------------------------------------------------------------------

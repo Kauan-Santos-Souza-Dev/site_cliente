@@ -300,8 +300,12 @@ class OrderAdminTest(TestCase):
     """Painel de pedidos no admin."""
 
     def setUp(self):
-        from django.contrib.auth.models import User
-        admin_user = User.objects.create_superuser('dona', 'dona@example.com', 'senha-teste-123')
+        # get_user_model() devolve o modelo de usuário em uso (contas.User,
+        # login por e-mail). Nunca importe o User do Django diretamente.
+        from django.contrib.auth import get_user_model
+        admin_user = get_user_model().objects.create_superuser(
+            email='dona@example.com', password='senha-teste-123',
+        )
         self.client.force_login(admin_user)  # entra sem digitar senha (só em testes)
         product = Product.objects.create(
             category=Category.objects.get(slug='vestidos'),

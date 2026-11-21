@@ -921,6 +921,42 @@ main:focus {
   border-color: #12784a;
 }
 
+/* 7.8) Contas: login e cadastro (v2) --------------------------------------- */
+/* Formulário estreito e centralizado: fica confortável no celular e no desktop. */
+.conta {
+  max-width: 30rem;
+}
+.conta .campo input {
+  width: 100%;
+}
+.campo__dica {
+  margin: -0.75rem 0 1.25rem;
+  font-size: 0.9rem;
+  color: var(--cor-texto-suave);
+}
+.conta__alternativa {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+/* Saudação e botão "Sair" no menu. O botão é um <button> (o logout é POST),
+   mas com cara de link, igual aos outros itens do menu. */
+.menu__conta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.menu__saudacao {
+  color: var(--cor-texto-suave);
+}
+.menu__botao {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* 7.4) Contato ------------------------------------------------------------- */
 .grade--contato {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
