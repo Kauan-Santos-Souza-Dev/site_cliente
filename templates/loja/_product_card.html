@@ -1,0 +1,28 @@
+{% comment %}
+  Cartão de produto, reutilizado na página inicial e no catálogo com:
+    {% include 'loja/_product_card.html' with product=product %}
+  O "_" no início do nome é só uma convenção: indica que este arquivo é um
+  pedaço de página, e não uma página inteira.
+{% endcomment %}
+<li class="cartao cartao--produto" data-revelar{% if delay %} data-atraso="{{ delay }}"{% endif %}>
+  <a class="cartao__link" href="{{ product.get_absolute_url }}">
+    {% with image=product.main_image %}
+    {% if image %}
+      {# loading="lazy": a foto só é baixada quando estiver perto de aparecer na tela. #}
+      <img class="cartao__imagem" src="{{ image.image.url }}"
+           alt="{{ image.alt_text|default:product.name }}"
+           width="600" height="800" loading="lazy">
+    {% else %}
+      <div class="cartao__imagem" aria-hidden="true"></div>
+    {% endif %}
+    {% endwith %}
+    <div class="cartao__corpo">
+      <p class="cartao__categoria">{{ product.category.name }}</p>
+      <h3 class="cartao__titulo">{{ product.name }}</h3>
+      <p class="cartao__preco">R$ {{ product.price }}</p>
+      {% if product.total_stock == 0 %}
+        <p class="selo-esgotado">Esgotado</p>
+      {% endif %}
+    </div>
+  </a>
+</li>

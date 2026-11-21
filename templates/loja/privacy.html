@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% comment %}
+  Política de Privacidade (LGPD — Lei 13.709/2018), em linguagem simples.
+  Se a loja passar a coletar outros dados, esta página precisa ser atualizada.
+{% endcomment %}
+
+{% block title %}Política de Privacidade — Elegância Cristã{% endblock %}
+{% block meta_description %}Como a Elegância Cristã usa e protege os seus dados pessoais.{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <h1 class="secao__titulo">Política de Privacidade</h1>
+    <p class="texto-pagina__data">Última atualização: novembro de 2026.</p>
+
+    <h2>Quais dados coletamos</h2>
+    <p>Só pedimos o necessário para entregar o seu pedido. Ao finalizar uma compra, você informa:</p>
+    <ul class="lista-simples">
+      <li>nome;</li>
+      <li>telefone/WhatsApp;</li>
+      <li>endereço de entrega (CEP, rua, número, complemento, bairro, cidade e UF).</li>
+    </ul>
+    <p>Não pedimos CPF, e-mail, data de nascimento nem dados de cartão. Você não precisa criar conta.</p>
+
+    <h2>Para que usamos</h2>
+    <ul class="lista-simples">
+      <li>Registrar o seu pedido e separar as peças;</li>
+      <li>conversar com você pelo WhatsApp para combinar frete e pagamento;</li>
+      <li>enviar o pedido ao endereço informado.</li>
+    </ul>
+    <p>Não vendemos nem compartilhamos seus dados para publicidade. Eles só são repassados à transportadora ou aos Correios, quando necessário para a entrega.</p>
+
+    <h2>Cookies</h2>
+    <p>O site usa apenas cookies essenciais: um para guardar o seu carrinho enquanto você navega e outro de segurança, que protege os formulários. Não usamos cookies de propaganda nem de rastreamento.</p>
+
+    <h2>Por quanto tempo guardamos</h2>
+    <p>Pelo tempo necessário para concluir a entrega e atender a eventuais trocas, ou enquanto a lei exigir.</p>
+
+    <h2>Seus direitos</h2>
+    <p>Pela LGPD, você pode pedir a qualquer momento para ver, corrigir ou apagar os seus dados. Basta falar com a gente pelo <a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">WhatsApp</a> ou pelo e-mail <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a>.</p>
+  </div>
+</section>
+{% endblock %}

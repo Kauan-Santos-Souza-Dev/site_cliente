@@ -1,0 +1,18 @@
+# Segredos: nunca versionar
+.env
+
+# Fotos enviadas pelo admin
+media/
+
+# Estáticos gerados pelo collectstatic (produção)
+staticfiles/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor / sistema
+.vscode/
+.DS_Store
+Thumbs.db

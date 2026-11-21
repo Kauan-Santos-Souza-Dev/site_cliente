@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{# Catálogo com filtro por categoria e paginação (view loja.views.catalog). #}
+
+{% block title %}{% if current_category %}{{ current_category.name }}{% else %}Catálogo{% endif %} — Elegância Cristã{% endblock %}
+{% block meta_description %}Catálogo de {% if current_category %}{{ current_category.name|lower }}{% else %}vestidos, saias e conjuntos{% endif %} femininos da Elegância Cristã.{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container">
+    <h1 class="secao__titulo">{% if current_category %}{{ current_category.name }}{% else %}Catálogo{% endif %}</h1>
+
+    {% comment %}
+      O filtro são links comuns (?categoria=...): funciona sem JavaScript,
+      pode ser salvo nos favoritos e compartilhado no WhatsApp.
+    {% endcomment %}
+    <nav class="filtro" aria-label="Filtrar por categoria">
+      <ul class="filtro__lista">
+        <li><a class="filtro__link" href="{% url 'catalog' %}"{% if not current_category %} aria-current="page"{% endif %}>Todos</a></li>
+        {% for category in categories %}
+        <li><a class="filtro__link" href="{% url 'catalog' %}?categoria={{ category.slug }}"{% if category == current_category %} aria-current="page"{% endif %}>{{ category.name }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+
+    {% if page.object_list %}
+      <ul class="grade grade--produtos">
+        {% for product in page.object_list %}
+          {% cycle '0' '1' '2' '3' as delay silent %}
+          {% include 'loja/_product_card.html' with product=product delay=delay %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="aviso-vazio">Ainda não há peças nesta categoria. <a href="{% url 'catalog' %}">Ver todas as peças</a>.</p>
+    {% endif %}
+
+    {% comment %}
+      Paginação: só aparece se houver mais de uma página.
+      Os links mantêm a categoria escolhida junto com o número da página.
+    {% endcomment %}
+    {% if page.has_other_pages %}
+    <nav class="paginacao" aria-label="Páginas do catálogo">
+      {% if page.has_previous %}
+        <a class="paginacao__link" href="?{% if current_category %}categoria={{ current_category.slug }}&amp;{% endif %}pagina={{ page.previous_page_number }}">← Anterior</a>
+      {% endif %}
+      <span class="paginacao__atual">Página {{ page.number }} de {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}
+        <a class="paginacao__link" href="?{% if current_category %}categoria={{ current_category.slug }}&amp;{% endif %}pagina={{ page.next_page_number }}">Próxima →</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

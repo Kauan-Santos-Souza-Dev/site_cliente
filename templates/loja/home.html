@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{# Página inicial: banner, lema, categorias e produtos em destaque (view loja.views.home). #}
+
+{% block content %}
+<section class="banner" aria-labelledby="banner-titulo">
+  {# data-parallax: o JavaScript move este fundo mais devagar que a rolagem. #}
+  <div class="banner__fundo" data-parallax aria-hidden="true"></div>
+  <div class="container banner__conteudo">
+    <p class="banner__sobretitulo" data-revelar>Moda feminina cristã</p>
+    <h1 class="banner__titulo" id="banner-titulo" data-revelar data-atraso="1">Elegância que reflete a sua fé</h1>
+    <p class="banner__texto" data-revelar data-atraso="2">Vestidos, saias e conjuntos pensados para você se sentir linda em todos os momentos.</p>
+    <div class="banner__acoes" data-revelar data-atraso="3">
+      <a class="botao" href="{% url 'catalog' %}">Ver catálogo</a>
+      <a class="botao botao--contorno-claro" href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">Falar no WhatsApp</a>
+    </div>
+  </div>
+</section>
+
+<section class="faixa-lema" aria-label="Lema da loja">
+  <p class="container" data-revelar>“{{ STORE_MOTTO }}”</p>
+</section>
+
+<section class="secao" aria-labelledby="categorias-titulo">
+  <div class="container">
+    <h2 class="secao__titulo" id="categorias-titulo" data-revelar>Categorias</h2>
+    <ul class="grade grade--categorias">
+      {% for category in categories %}
+      {# forloop.counter0 conta 0, 1, 2...: usado para escalonar a animação. #}
+      <li class="cartao cartao--categoria" data-revelar data-atraso="{{ forloop.counter0 }}">
+        <a href="{% url 'catalog' %}?categoria={{ category.slug }}"><span class="cartao__titulo">{{ category.name }}</span></a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+
+<section class="secao secao--clara" aria-labelledby="destaques-titulo">
+  <div class="container">
+    <h2 class="secao__titulo" id="destaques-titulo" data-revelar>Destaques</h2>
+    <p class="secao__subtitulo" data-revelar>Peças escolhidas com carinho para você.</p>
+    {% if featured_products %}
+      <ul class="grade grade--produtos">
+        {% for product in featured_products %}
+          {% cycle '0' '1' '2' '3' as delay silent %}
+          {% include 'loja/_product_card.html' with product=product delay=delay %}
+        {% endfor %}
+      </ul>
+      <p class="secao__acao"><a class="botao" href="{% url 'catalog' %}">Ver todo o catálogo</a></p>
+    {% else %}
+      <p class="aviso-vazio">Novidades chegando em breve. Enquanto isso, <a href="{% url 'catalog' %}">veja o catálogo</a>.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

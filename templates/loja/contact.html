@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% comment %}
+  Página de Contato: só links, sem formulário (decisão em DECISIONS.md).
+  Os dados vêm do context processor store_info, nunca escritos aqui.
+{% endcomment %}
+
+{% block title %}Contato — Elegância Cristã{% endblock %}
+{% block meta_description %}Fale com a Elegância Cristã pelo WhatsApp, Instagram ou e-mail.{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container">
+    <h1 class="secao__titulo">Contato</h1>
+    <p class="secao__subtitulo">Tire dúvidas sobre tamanhos, frete e pagamento. Respondemos com carinho!</p>
+
+    <ul class="grade grade--contato">
+      <li class="cartao cartao--contato" data-revelar>
+        <h2 class="cartao__titulo">WhatsApp</h2>
+        <p>O jeito mais rápido de falar com a gente.</p>
+        <a class="botao" href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">Abrir conversa</a>
+      </li>
+      <li class="cartao cartao--contato" data-revelar data-atraso="1">
+        <h2 class="cartao__titulo">Instagram</h2>
+        <p>Novidades, looks e lançamentos.</p>
+        <a class="botao" href="https://instagram.com/{{ INSTAGRAM_HANDLE }}" target="_blank" rel="noopener">@{{ INSTAGRAM_HANDLE }}</a>
+      </li>
+      <li class="cartao cartao--contato" data-revelar data-atraso="2">
+        <h2 class="cartao__titulo">E-mail</h2>
+        <p>Para assuntos que não são urgentes.</p>
+        <a class="botao" href="mailto:{{ CONTACT_EMAIL }}">Enviar e-mail</a>
+      </li>
+    </ul>
+  </div>
+</section>
+{% endblock %}

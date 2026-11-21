@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{# Checkout: dados da cliente + resumo do carrinho (view pedidos.views.checkout). #}
+
+{% block title %}Finalizar pedido — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container">
+    <h1 class="secao__titulo">Finalizar pedido</h1>
+
+    <div class="checkout">
+      {% comment %}
+        novalidate: desliga as mensagens automáticas do navegador para que
+        todas as mensagens de erro venham do Django, em português e iguais em
+        qualquer navegador. A validação de verdade é sempre a do servidor.
+      {% endcomment %}
+      <form class="checkout__form" method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+          <div class="mensagem mensagem--error" role="alert">{{ form.non_field_errors|join:" " }}</div>
+        {% endif %}
+
+        <fieldset class="checkout__grupo">
+          <legend>Seus dados</legend>
+          {% include 'pedidos/_campo.html' with field=form.customer_name %}
+          {% include 'pedidos/_campo.html' with field=form.phone %}
+        </fieldset>
+
+        <fieldset class="checkout__grupo">
+          <legend>Endereço de entrega</legend>
+          <div class="checkout__linha">
+            {% include 'pedidos/_campo.html' with field=form.cep %}
+            {% include 'pedidos/_campo.html' with field=form.state %}
+          </div>
+          {% include 'pedidos/_campo.html' with field=form.street %}
+          <div class="checkout__linha">
+            {% include 'pedidos/_campo.html' with field=form.number %}
+            {% include 'pedidos/_campo.html' with field=form.complement %}
+          </div>
+          {% include 'pedidos/_campo.html' with field=form.neighborhood %}
+          {% include 'pedidos/_campo.html' with field=form.city %}
+        </fieldset>
+
+        {# Aviso exigido pela LGPD: para que os dados serão usados. #}
+        <p class="aviso-lgpd">
+          Usamos seus dados apenas para registrar e entregar o pedido e para falar com você
+          pelo WhatsApp sobre frete e pagamento. Saiba mais na
+          <a href="{% url 'privacy' %}">Política de Privacidade</a>.
+        </p>
+
+        <button class="botao botao--largo" type="submit">Confirmar pedido</button>
+      </form>
+
+      <aside class="checkout__resumo" aria-labelledby="resumo-titulo">
+        <h2 id="resumo-titulo" class="produto__subtitulo">Resumo</h2>
+        <ul class="resumo">
+          {% for item in items %}
+          <li class="resumo__item">
+            <span>{{ item.product.name }} ({{ item.variant.size }}) × {{ item.quantity }}</span>
+            <span>R$ {{ item.subtotal }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="carrinho__total">Total: <strong>R$ {{ total }}</strong></p>
+        <p class="produto__frete">Frete a combinar pelo WhatsApp. O pagamento (Pix etc.) também é combinado na conversa.</p>
+        <p><a href="{% url 'cart_detail' %}">← Voltar ao carrinho</a></p>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}

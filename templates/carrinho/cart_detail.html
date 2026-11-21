@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{# Página do carrinho (view carrinho.views.cart_detail). #}
+
+{% block title %}Carrinho — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container">
+    <h1 class="secao__titulo">Seu carrinho</h1>
+
+    {% if items %}
+      {% if has_stock_problem %}
+        <p class="mensagem mensagem--error">Algumas peças ficaram com estoque menor do que a quantidade escolhida. Ajuste as quantidades marcadas abaixo.</p>
+      {% endif %}
+
+      <ul class="carrinho">
+        {% for item in items %}
+        <li class="carrinho__item">
+          {% with image=item.product.main_image %}
+          <a class="carrinho__foto" href="{{ item.product.get_absolute_url }}" tabindex="-1" aria-hidden="true">
+            {% if image %}
+              <img src="{{ image.image.url }}" alt="" width="96" height="128" loading="lazy">
+            {% endif %}
+          </a>
+          {% endwith %}
+
+          <div class="carrinho__info">
+            <h2 class="carrinho__nome"><a href="{{ item.product.get_absolute_url }}">{{ item.product.name }}</a></h2>
+            <p class="carrinho__detalhe">Tamanho {{ item.variant.size }} · R$ {{ item.price }} cada</p>
+            {% if item.stock_problem %}
+              <p class="carrinho__alerta">Temos apenas {{ item.variant.stock }} peça{{ item.variant.stock|pluralize }} neste tamanho.</p>
+            {% endif %}
+
+            <div class="carrinho__acoes">
+              {# Cada ação é um formulário POST próprio, com seu token CSRF. #}
+              <form class="carrinho__quantidade" method="post" action="{% url 'cart_update' item.variant.id %}">
+                {% csrf_token %}
+                <label for="qtd-{{ item.variant.id }}">Quantidade</label>
+                <input id="qtd-{{ item.variant.id }}" type="number" name="quantity" value="{{ item.quantity }}" min="1" required inputmode="numeric">
+                <button class="botao-texto" type="submit">Atualizar<span class="visualmente-oculto"> {{ item.product.name }}</span></button>
+              </form>
+              <form method="post" action="{% url 'cart_remove' item.variant.id %}">
+                {% csrf_token %}
+                <button class="botao-texto botao-texto--remover" type="submit">Remover<span class="visualmente-oculto"> {{ item.product.name }}, tamanho {{ item.variant.size }}</span></button>
+              </form>
+            </div>
+          </div>
+
+          <p class="carrinho__subtotal"><span class="visualmente-oculto">Subtotal: </span>R$ {{ item.subtotal }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+
+      <div class="carrinho__resumo">
+        <p class="carrinho__total">Total: <strong>R$ {{ total }}</strong></p>
+        <p class="produto__frete">Frete a combinar pelo WhatsApp.</p>
+        {% if has_stock_problem %}
+          <button class="botao botao--largo" type="button" disabled>Ajuste as quantidades para finalizar</button>
+        {% else %}
+          <a class="botao botao--largo" href="{% url 'checkout' %}">Finalizar pedido</a>
+        {% endif %}
+        <p><a href="{% url 'catalog' %}">← Continuar comprando</a></p>
+      </div>
+    {% else %}
+      <div class="texto-pagina texto-pagina--centro">
+        <p>Seu carrinho está vazio.</p>
+        <p><a class="botao" href="{% url 'catalog' %}">Ver o catálogo</a></p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

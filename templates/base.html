@@ -1,0 +1,106 @@
+{% load static %}<!doctype html>
+{# Template base: todas as páginas "estendem" este arquivo e preenchem os blocos. #}
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Elegância Cristã — Moda feminina{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Vestidos, saias e conjuntos femininos com elegância e fé. {{ STORE_MOTTO }}.{% endblock %}">
+  <meta name="theme-color" content="#907690">
+  <link rel="icon" type="image/png" href="{% static 'img/favicon.png' %}">
+  <link rel="preload" href="{% static 'fonts/cormorant-garamond-latin-600-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  {# Marca que o JavaScript está ativo. Sem JS, as animações não escondem nada. #}
+  <script>document.documentElement.classList.add('js');</script>
+  {# defer: o script só roda depois que o HTML foi lido, sem travar a página. #}
+  <script src="{% static 'js/main.js' %}" defer></script>
+</head>
+<body>
+  <a class="pular-conteudo" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="cabecalho" id="cabecalho">
+    <div class="container cabecalho__interno">
+      <a class="cabecalho__logo" href="{% url 'home' %}" aria-label="Elegância Cristã — página inicial">
+        <img src="{% static 'img/logo-lilas.webp' %}" alt="" width="56" height="56">
+        <span class="cabecalho__nome">Elegância Cristã</span>
+      </a>
+
+      <button class="menu-botao" type="button" aria-expanded="false" aria-controls="menu-principal">
+        <span class="menu-botao__barra" aria-hidden="true"></span>
+        <span class="visualmente-oculto">Abrir menu</span>
+      </button>
+
+      <nav class="menu" id="menu-principal" aria-label="Menu principal">
+        {% comment %}
+          request.resolver_match.url_name é o "name" da rota atual (ver loja/urls.py).
+          aria-current="page" avisa ao leitor de tela qual é a página atual,
+          e o CSS usa o mesmo atributo para destacar o link.
+        {% endcomment %}
+        {% with atual=request.resolver_match.url_name %}
+        <ul class="menu__lista">
+          <li><a class="menu__link" href="{% url 'home' %}"{% if atual == 'home' %} aria-current="page"{% endif %}>Início</a></li>
+          <li><a class="menu__link" href="{% url 'catalog' %}"{% if atual == 'catalog' or atual == 'product_detail' %} aria-current="page"{% endif %}>Catálogo</a></li>
+          <li><a class="menu__link" href="{% url 'about' %}"{% if atual == 'about' %} aria-current="page"{% endif %}>Sobre</a></li>
+          <li><a class="menu__link" href="{% url 'contact' %}"{% if atual == 'contact' %} aria-current="page"{% endif %}>Contato</a></li>
+          <li>
+            {# cart_count vem do context processor carrinho.context_processors.cart_count. #}
+            <a class="menu__link menu__link--carrinho" href="{% url 'cart_detail' %}"{% if atual == 'cart_detail' %} aria-current="page"{% endif %}>
+              <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12l-1 13H7L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>
+              Carrinho
+              {% if cart_count %}
+                {# O leitor de tela lê "Carrinho, 3 peças"; a bolinha com o número é só visual. #}
+                <span class="contador" aria-hidden="true">{{ cart_count }}</span>
+                <span class="visualmente-oculto">, {{ cart_count }} peça{{ cart_count|pluralize }}</span>
+              {% endif %}
+            </a>
+          </li>
+        </ul>
+        {% endwith %}
+      </nav>
+    </div>
+  </header>
+
+  <main id="conteudo" tabindex="-1">
+    {% comment %}
+      Avisos do framework de mensagens do Django (ex.: "adicionado ao carrinho").
+      Cada aviso aparece uma vez só, na primeira página exibida depois de criado.
+      role="status" faz o leitor de tela anunciar o aviso.
+    {% endcomment %}
+    {% if messages %}
+    <div class="mensagens container" role="status">
+      {% for message in messages %}
+        <p class="mensagem mensagem--{{ message.tags }}">{{ message }}</p>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="rodape">
+    <div class="container rodape__grade">
+      <div>
+        <img src="{% static 'img/logo-branca.webp' %}" alt="" width="72" height="72" loading="lazy">
+        <p class="rodape__lema">“{{ STORE_MOTTO }}”</p>
+      </div>
+      <div>
+        <h2 class="rodape__titulo">Fale com a gente</h2>
+        <ul class="rodape__lista">
+          <li><a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">WhatsApp</a></li>
+          <li><a href="https://instagram.com/{{ INSTAGRAM_HANDLE }}" target="_blank" rel="noopener">Instagram @{{ INSTAGRAM_HANDLE }}</a></li>
+          <li><a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="rodape__titulo">Informações</h2>
+        <ul class="rodape__lista">
+          <li>Frete a combinar pelo WhatsApp</li>
+          <li><a href="{% url 'catalog' %}">Catálogo</a></li>
+          <li><a href="{% url 'about' %}">Sobre a loja</a></li>
+          <li><a href="{% url 'privacy' %}">Política de Privacidade</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="rodape__copyright">© {% now "Y" %} Elegância Cristã</p>
+  </footer>
+</body>
+</html>

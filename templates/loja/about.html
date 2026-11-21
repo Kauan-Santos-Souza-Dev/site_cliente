@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{# Página Sobre. TEXTO PROVISÓRIO: a dona da loja deve revisar antes de publicar. #}
+
+{% block title %}Sobre — Elegância Cristã{% endblock %}
+{% block meta_description %}Conheça a Elegância Cristã: moda feminina com elegância, modéstia e fé.{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <h1 class="secao__titulo">Sobre a loja</h1>
+
+    <p class="texto-pagina__destaque" data-revelar>“{{ STORE_MOTTO }}”</p>
+
+    <p data-revelar>A Elegância Cristã nasceu do desejo de oferecer roupas femininas que unem beleza, conforto e modéstia. Acreditamos que a mulher pode se vestir com elegância em todos os momentos: no culto, no trabalho, em um encontro com a família ou em uma ocasião especial.</p>
+
+    <p data-revelar>Selecionamos vestidos, saias e conjuntos com caimento cuidadoso e tecidos agradáveis, para que você se sinta bonita e à vontade, refletindo por fora a alegria que carrega por dentro.</p>
+
+    <h2 data-revelar>Como comprar</h2>
+    <ol class="lista-passos" data-revelar>
+      <li>Escolha suas peças no <a href="{% url 'catalog' %}">catálogo</a>.</li>
+      <li>Finalize o pedido informando nome, WhatsApp e endereço.</li>
+      <li>Você será levada ao nosso WhatsApp para combinar o frete e o pagamento.</li>
+    </ol>
+
+    <p data-revelar><a class="botao" href="{% url 'contact' %}">Fale com a gente</a></p>
+  </div>
+</section>
+{% endblock %}

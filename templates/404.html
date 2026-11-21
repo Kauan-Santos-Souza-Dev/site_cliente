@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% comment %}
+  Página "não encontrada". O Django usa este arquivo automaticamente
+  quando DEBUG=False (em produção). Com DEBUG=True aparece a página
+  técnica amarela do Django, útil para desenvolver.
+{% endcomment %}
+
+{% block title %}Página não encontrada — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina texto-pagina--centro">
+    <h1 class="secao__titulo">Página não encontrada</h1>
+    <p>Esta peça pode ter saído do catálogo ou o endereço está incorreto.</p>
+    <p><a class="botao" href="{% url 'catalog' %}">Ver o catálogo</a></p>
+  </div>
+</section>
+{% endblock %}

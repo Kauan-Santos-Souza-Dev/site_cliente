@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{# Página de um produto (view loja.views.product_detail). #}
+
+{% block title %}{{ product.name }} — Elegância Cristã{% endblock %}
+{% block meta_description %}{{ product.name }} ({{ product.category.name }}) por R$ {{ product.price }}. {{ product.description|truncatewords:20 }}{% endblock %}
+
+{% block content %}
+<div class="container produto">
+  {# Trilha de navegação ("breadcrumb"): mostra onde a pessoa está. #}
+  <nav class="trilha" aria-label="Você está em">
+    <ol>
+      <li><a href="{% url 'catalog' %}">Catálogo</a></li>
+      <li><a href="{% url 'catalog' %}?categoria={{ product.category.slug }}">{{ product.category.name }}</a></li>
+      <li aria-current="page">{{ product.name }}</li>
+    </ol>
+  </nav>
+
+  <div class="produto__grade">
+    {% comment %}
+      Galeria: a primeira imagem é a principal (o model ordena por is_main).
+      As miniaturas são links para a foto: sem JavaScript, abrem a imagem;
+      com JavaScript (main.js → ativarGaleriaProduto), trocam a foto grande.
+    {% endcomment %}
+    <div class="galeria">
+      {% if images %}
+        {% with main=images.0 %}
+        <img class="galeria__principal" id="galeria-principal" src="{{ main.image.url }}"
+             alt="{{ main.alt_text|default:product.name }}" width="600" height="800">
+        {% endwith %}
+        {% if images|length > 1 %}
+        <ul class="galeria__miniaturas">
+          {% for image in images %}
+          <li>
+            <a class="galeria__miniatura" href="{{ image.image.url }}"
+               data-alt="{{ image.alt_text|default:product.name }}"{% if forloop.first %} aria-current="true"{% endif %}>
+              <img src="{{ image.image.url }}" alt="Ver foto {{ forloop.counter }} de {{ product.name }}" width="80" height="107" loading="lazy">
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      {% else %}
+        <div class="galeria__principal galeria__principal--vazia" aria-hidden="true"></div>
+      {% endif %}
+    </div>
+
+    <div class="produto__info">
+      <p class="produto__categoria">{{ product.category.name }}</p>
+      <h1 class="produto__nome">{{ product.name }}</h1>
+      <p class="produto__preco">R$ {{ product.price }}</p>
+
+      {% if product.description %}
+        {# linebreaks transforma as quebras de linha do admin em parágrafos. #}
+        <div class="produto__descricao">{{ product.description|linebreaks }}</div>
+      {% endif %}
+
+      {% if product.total_stock > 0 %}
+      {% comment %}
+        Formulário de compra. Vai por POST para carrinho.views.cart_add.
+        {% csrf_token %} coloca um código secreto escondido no formulário;
+        o Django recusa o POST sem ele (proteção CSRF).
+        Os tamanhos são rádios comuns: funciona sem JavaScript.
+      {% endcomment %}
+      <form class="form-compra" method="post" action="{% url 'cart_add' product.id %}">
+        {% csrf_token %}
+        <fieldset class="tamanhos">
+          <legend class="produto__subtitulo">Tamanho</legend>
+          {% for variant in variants %}
+          <label class="tamanho{% if variant.stock == 0 %} tamanho--esgotado{% endif %}">
+            <input class="tamanho__radio" type="radio" name="variant" value="{{ variant.id }}" required{% if variant.stock == 0 %} disabled{% endif %}>
+            <span class="tamanho__texto">{{ variant.size }}</span>
+            {# O risco é só visual; este texto oculto avisa o leitor de tela. #}
+            {% if variant.stock == 0 %}<span class="visualmente-oculto">(esgotado)</span>{% endif %}
+          </label>
+          {% endfor %}
+        </fieldset>
+
+        <div class="campo campo--quantidade">
+          <label for="quantidade">Quantidade</label>
+          <input id="quantidade" type="number" name="quantity" value="1" min="1" required inputmode="numeric">
+        </div>
+
+        <button class="botao botao--largo" type="submit">Adicionar ao carrinho</button>
+      </form>
+      {% else %}
+        <p class="selo-esgotado">Esgotado</p>
+        <p>Quer saber quando volta? Fale com a gente pelo WhatsApp.</p>
+      {% endif %}
+
+      <p class="produto__frete">Frete a combinar pelo WhatsApp.</p>
+      <p><a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">Tirar dúvidas no WhatsApp</a></p>
+    </div>
+  </div>
+</div>
+{% endblock %}

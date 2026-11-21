@@ -1,0 +1,1087 @@
+/* ==========================================================================
+   Elegância Cristã — folha de estilo principal
+   Organização: 1) variáveis  2) fontes  3) base  4) utilitários
+   5) cabeçalho e menu  6) banner  7) seções e cartões  8) rodapé
+   9) animações  10) telas maiores (tablet/desktop)
+
+   Mobile-first: as regras "soltas" valem para o celular. As telas maiores
+   ganham ajustes dentro de @media (min-width: ...) no final do arquivo.
+   ========================================================================== */
+
+/* 1) Variáveis ------------------------------------------------------------
+   Mude a cor da loja inteira trocando só os valores abaixo. */
+:root {
+  --cor-principal: #907690;          /* lilás do logo: fundos e detalhes */
+  --cor-principal-escura: #6b516b;   /* texto, links e botões (bom contraste) */
+  --cor-principal-clara: #f6f2f6;    /* fundo de seções alternadas */
+  --cor-fundo: #ffffff;
+  --cor-texto: #2e2430;
+  --cor-texto-suave: #5f5562;
+  --cor-borda: #e6dde6;
+
+  --fonte-titulo: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --fonte-texto: 'Lato', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+
+  --espaco: 1rem;
+  --raio: 10px;
+  --sombra: 0 6px 24px rgba(46, 36, 48, 0.08);
+  --altura-cabecalho: 72px;
+  --transicao: 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 2) Fontes (arquivos em static/fonts, sem acessar o Google) --------------
+   font-display: swap mostra o texto com a fonte reserva até a fonte chegar. */
+@font-face {
+  font-family: 'Cormorant Garamond';
+  src: url('../fonts/cormorant-garamond-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cormorant Garamond';
+  src: url('../fonts/cormorant-garamond-latin-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Lato';
+  src: url('../fonts/lato-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Lato';
+  src: url('../fonts/lato-latin-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* 3) Base ----------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Ao pular para uma âncora, desconta a altura do cabeçalho fixo. */
+  scroll-padding-top: var(--altura-cabecalho);
+}
+
+body {
+  margin: 0;
+  background: var(--cor-fundo);
+  color: var(--cor-texto);
+  font-family: var(--fonte-texto);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+h1, h2, h3 {
+  font-family: var(--fonte-titulo);
+  font-weight: 600;
+  line-height: 1.15;
+  margin: 0 0 0.5em;
+}
+
+p {
+  margin: 0 0 1em;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+a {
+  color: var(--cor-principal-escura);
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Foco bem visível para quem navega com teclado (Tab). */
+:focus-visible {
+  outline: 3px solid var(--cor-principal-escura);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+main:focus {
+  outline: none;
+}
+
+/* 4) Utilitários ---------------------------------------------------------- */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--espaco);
+}
+
+/* Esconde da tela, mas mantém para leitores de tela. */
+.visualmente-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Link "Pular para o conteúdo": só aparece ao receber foco pelo teclado. */
+.pular-conteudo {
+  position: absolute;
+  left: var(--espaco);
+  top: -100px;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--cor-principal-escura);
+  color: #fff;
+  border-radius: var(--raio);
+}
+.pular-conteudo:focus {
+  top: var(--espaco);
+}
+
+.botao {
+  display: inline-block;
+  padding: 0.8rem 1.6rem;
+  border: 2px solid var(--cor-principal-escura);
+  border-radius: 999px;
+  background: var(--cor-principal-escura);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+}
+.botao:hover {
+  background: var(--cor-texto);
+  border-color: var(--cor-texto);
+  transform: translateY(-2px);
+}
+.botao--contorno-claro {
+  background: transparent;
+  border-color: #fff;
+}
+.botao--contorno-claro:hover {
+  background: #fff;
+  border-color: #fff;
+  color: var(--cor-principal-escura);
+}
+
+/* 5) Cabeçalho e menu ----------------------------------------------------- */
+.cabecalho {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  height: var(--altura-cabecalho);
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid var(--cor-borda);
+  transition: transform 0.35s ease;
+}
+/* Classe colocada pelo JavaScript ao rolar para baixo. */
+.cabecalho--oculto {
+  transform: translateY(-100%);
+}
+
+.cabecalho__interno {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+}
+
+.cabecalho__logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+}
+.cabecalho__logo img {
+  width: 52px;
+  height: 52px;
+}
+.cabecalho__nome {
+  font-family: var(--fonte-titulo);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--cor-principal-escura);
+}
+
+/* Botão "hambúrguer": três barras desenhadas com uma barra + ::before/::after. */
+.menu-botao {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.menu-botao__barra,
+.menu-botao__barra::before,
+.menu-botao__barra::after {
+  position: absolute;
+  left: 10px;
+  width: 24px;
+  height: 2px;
+  background: var(--cor-principal-escura);
+  transition: transform 0.3s, opacity 0.3s;
+}
+.menu-botao__barra {
+  top: 21px;
+}
+.menu-botao__barra::before,
+.menu-botao__barra::after {
+  content: '';
+  left: 0;
+}
+.menu-botao__barra::before { top: -7px; }
+.menu-botao__barra::after { top: 7px; }
+
+/* Quando o menu está aberto, as barras viram um "X". */
+.menu-botao[aria-expanded='true'] .menu-botao__barra { background: transparent; }
+.menu-botao[aria-expanded='true'] .menu-botao__barra::before { transform: translateY(7px) rotate(45deg); }
+.menu-botao[aria-expanded='true'] .menu-botao__barra::after { transform: translateY(-7px) rotate(-45deg); }
+
+/* No celular, o menu é um painel que desce abaixo do cabeçalho. */
+.menu {
+  position: absolute;
+  top: var(--altura-cabecalho);
+  left: 0;
+  right: 0;
+  background: var(--cor-fundo);
+  border-bottom: 1px solid var(--cor-borda);
+  box-shadow: var(--sombra);
+  display: none;
+}
+.menu--aberto {
+  display: block;
+}
+.menu__lista {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem var(--espaco) 1rem;
+}
+.menu__link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 0;
+  color: var(--cor-texto);
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.menu__link:hover {
+  color: var(--cor-principal-escura);
+}
+
+/* 6) Banner (hero) -------------------------------------------------------- */
+.banner {
+  position: relative;
+  overflow: hidden;
+  min-height: 85vh;
+  display: flex;
+  align-items: center;
+  padding: calc(var(--altura-cabecalho) + 2rem) 0 3rem;
+  color: #fff;
+}
+/* O fundo é maior que o banner para sobrar espaço ao mover (parallax). */
+.banner__fundo {
+  position: absolute;
+  inset: -15% 0;
+  /* O degradê termina em #7d637d (e não no lilás do logo) para o texto
+     branco manter contraste de pelo menos 4,5:1 em todo o banner. */
+  background:
+    radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.08), transparent 45%),
+    linear-gradient(135deg, var(--cor-principal-escura), #7d637d);
+  will-change: transform;
+}
+.banner__conteudo {
+  position: relative; /* fica acima do fundo */
+}
+.banner__sobretitulo {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.banner__titulo {
+  font-size: clamp(2.4rem, 8vw, 4.2rem);
+  font-weight: 500;
+}
+.banner__texto {
+  font-size: 1.1rem;
+  max-width: 34ch;
+}
+.banner__titulo {
+  max-width: 14ch;
+}
+.banner__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1.5rem;
+}
+
+.faixa-lema {
+  background: var(--cor-principal-clara);
+  text-align: center;
+  padding: 2rem 0;
+}
+.faixa-lema p {
+  margin: 0;
+  font-family: var(--fonte-titulo);
+  font-size: clamp(1.5rem, 5vw, 2.2rem);
+  font-style: italic;
+  color: var(--cor-principal-escura);
+}
+
+/* 7) Seções e cartões ----------------------------------------------------- */
+.secao {
+  padding: 3.5rem 0;
+}
+.secao--clara {
+  background: var(--cor-principal-clara);
+}
+.secao__titulo {
+  font-size: clamp(2rem, 6vw, 2.8rem);
+  text-align: center;
+  color: var(--cor-principal-escura);
+}
+.secao__subtitulo {
+  text-align: center;
+  color: var(--cor-texto-suave);
+  margin-bottom: 2rem;
+}
+
+/* Grade responsiva: cria quantas colunas couberem, cada uma com no mínimo
+   a largura indicada. Não precisa de media query para isso. */
+.grade {
+  display: grid;
+  gap: 1.25rem;
+}
+.grade--categorias {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+/* 140px: cabem 2 peças por linha mesmo em celulares de 360px. */
+.grade--produtos {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.cartao {
+  background: var(--cor-fundo);
+  border-radius: var(--raio);
+  overflow: hidden;
+  box-shadow: var(--sombra);
+}
+.cartao__titulo {
+  font-family: var(--fonte-titulo);
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.cartao--categoria a {
+  display: flex;
+  align-items: flex-end;
+  min-height: 160px;
+  padding: 1.25rem;
+  background: linear-gradient(160deg, var(--cor-principal), var(--cor-principal-escura));
+  color: #fff;
+  text-decoration: none;
+  transition: transform 0.3s;
+}
+.cartao--categoria a:hover {
+  transform: scale(1.02);
+}
+.cartao--categoria .cartao__titulo {
+  font-size: 1.8rem;
+}
+
+/* Serve tanto para a foto (<img>) quanto para o espaço vazio (<div>) de
+   produto sem foto. object-fit: cover recorta a foto sem deformá-la. */
+.cartao__imagem {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: linear-gradient(180deg, #ece4ec, #d9cbd9);
+}
+.cartao__corpo {
+  padding: 0.9rem 1rem 1.1rem;
+}
+.cartao__preco {
+  margin: 0.25rem 0 0;
+  font-weight: 700;
+  color: var(--cor-principal-escura);
+}
+
+/* Cartão de produto inteiro clicável; sobe levemente no hover. */
+.cartao__link {
+  display: block;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.3s;
+}
+.cartao__link:hover {
+  transform: translateY(-4px);
+}
+.cartao__categoria {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cor-texto-suave);
+}
+.selo-esgotado {
+  display: inline-block;
+  margin: 0.5rem 0 0;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--cor-texto-suave);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.secao__acao {
+  margin: 2.5rem 0 0;
+  text-align: center;
+}
+.aviso-vazio {
+  text-align: center;
+  color: var(--cor-texto-suave);
+}
+
+/* Página do menu atual: mesmo atributo que o leitor de tela usa. */
+.menu__link[aria-current='page'] {
+  color: var(--cor-principal-escura);
+}
+
+/* 7.1) Páginas internas ---------------------------------------------------
+   O cabeçalho é fixo (fica por cima do conteúdo). No banner da home isso é
+   desejado; nas outras páginas, abrimos espaço do tamanho do cabeçalho. */
+.secao--topo,
+.produto {
+  padding-top: calc(var(--altura-cabecalho) + 2rem);
+}
+
+/* Textos longos (Sobre, Privacidade): linha mais curta, mais fácil de ler. */
+.texto-pagina {
+  max-width: 46rem;
+}
+.texto-pagina h2 {
+  margin-top: 2rem;
+  font-size: 1.7rem;
+  color: var(--cor-principal-escura);
+}
+.texto-pagina__destaque {
+  font-family: var(--fonte-titulo);
+  font-size: 1.6rem;
+  font-style: italic;
+  text-align: center;
+  color: var(--cor-principal-escura);
+}
+.texto-pagina__data {
+  text-align: center;
+  color: var(--cor-texto-suave);
+}
+.texto-pagina--centro {
+  text-align: center;
+}
+.lista-simples,
+.lista-passos {
+  margin: 0 0 1em;
+  padding-left: 1.4rem;
+}
+.lista-simples {
+  list-style: disc;
+}
+.lista-passos li,
+.lista-simples li {
+  margin-bottom: 0.4rem;
+}
+
+/* 7.2) Catálogo: filtro e paginação ---------------------------------------- */
+.filtro {
+  margin-bottom: 2rem;
+}
+.filtro__lista {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.filtro__link {
+  display: inline-block;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--cor-borda);
+  border-radius: 999px;
+  color: var(--cor-texto);
+  text-decoration: none;
+  font-weight: 700;
+}
+.filtro__link:hover {
+  border-color: var(--cor-principal-escura);
+}
+.filtro__link[aria-current='page'] {
+  background: var(--cor-principal-escura);
+  border-color: var(--cor-principal-escura);
+  color: #fff;
+}
+
+.paginacao {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2.5rem;
+}
+.paginacao__link {
+  font-weight: 700;
+}
+.paginacao__atual {
+  color: var(--cor-texto-suave);
+}
+
+/* 7.3) Página do produto --------------------------------------------------- */
+.produto {
+  padding-bottom: 3.5rem;
+}
+
+/* Trilha: Catálogo › Vestidos › Nome do produto */
+.trilha ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+  color: var(--cor-texto-suave);
+}
+.trilha li + li::before {
+  content: '›';
+  margin-right: 0.4rem;
+}
+
+/* No celular: foto em cima, informações embaixo (1 coluna). */
+.produto__grade {
+  display: grid;
+  gap: 2rem;
+}
+
+.galeria__principal {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: var(--raio);
+  background: linear-gradient(180deg, #ece4ec, #d9cbd9);
+}
+.galeria__miniaturas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.galeria__miniatura {
+  display: block;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.galeria__miniatura[aria-current='true'] {
+  border-color: var(--cor-principal-escura);
+}
+.galeria__miniatura img {
+  width: 64px;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+.produto__categoria {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+  color: var(--cor-texto-suave);
+}
+.produto__nome {
+  font-size: clamp(2.2rem, 7vw, 3rem);
+  color: var(--cor-principal-escura);
+}
+.produto__preco {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.produto__subtitulo {
+  font-size: 1.4rem;
+  margin-top: 1.5rem;
+}
+.produto__frete {
+  margin-top: 1rem;
+  color: var(--cor-texto-suave);
+}
+
+/* Seletor de tamanho: cada tamanho é um <input type="radio"> escondido
+   visualmente, e o <span> ao lado é a "caixinha" que a cliente vê.
+   O seletor "+" pega o span logo depois do rádio, para mostrar o marcado. */
+.tamanhos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: 0;
+}
+.tamanhos legend {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0;
+}
+.tamanho {
+  position: relative;
+  cursor: pointer;
+}
+.tamanho__radio {
+  /* Escondido, mas continua recebendo foco pelo teclado (setas e Tab). */
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.tamanho__texto {
+  display: block;
+  min-width: 3rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--cor-principal-escura);
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 700;
+  transition: background 0.2s, color 0.2s;
+}
+.tamanho__radio:checked + .tamanho__texto {
+  background: var(--cor-principal-escura);
+  color: #fff;
+}
+.tamanho__radio:focus-visible + .tamanho__texto {
+  outline: 3px solid var(--cor-principal-escura);
+  outline-offset: 3px;
+}
+/* Tamanho esgotado: riscado e apagado (o texto oculto avisa o leitor de tela). */
+.tamanho--esgotado {
+  cursor: not-allowed;
+}
+.tamanho--esgotado .tamanho__texto {
+  border-color: var(--cor-borda);
+  color: var(--cor-texto-suave);
+  text-decoration: line-through;
+}
+
+/* Campos de formulário (quantidade, e o checkout na etapa 7). */
+.campo {
+  margin-bottom: 1.25rem;
+}
+.campo label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+}
+.campo input,
+.carrinho__quantidade input {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--cor-texto-suave);
+  border-radius: 6px;
+  font: inherit;
+}
+.campo--quantidade input,
+.carrinho__quantidade input {
+  width: 5rem;
+}
+
+.botao--largo {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.botao:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 7.5) Mensagens e contador do carrinho ----------------------------------- */
+/* As mensagens ficam no topo do <main>; o espaço do cabeçalho fixo passa a
+   ser dado por elas, e a seção seguinte não precisa repeti-lo. */
+.mensagens {
+  padding-top: calc(var(--altura-cabecalho) + 1.5rem);
+}
+.mensagens + .secao--topo,
+.mensagens + .produto {
+  padding-top: 1.5rem;
+}
+.mensagem {
+  margin: 0 0 0.75rem;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--cor-principal-escura);
+  border-radius: 6px;
+  background: var(--cor-principal-clara);
+}
+.mensagem--error {
+  border-left-color: #a3263b;   /* vermelho escuro: contraste ~7:1 no fundo claro */
+  background: #fbeef0;
+  color: #7a1c2c;
+}
+
+.contador {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--cor-principal-escura);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+/* 7.6) Página do carrinho -------------------------------------------------- */
+/* No celular: foto à esquerda e informações ao lado; subtotal embaixo. */
+.carrinho__item {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 0.5rem 1rem;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--cor-borda);
+}
+.carrinho__foto img {
+  width: 80px;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.carrinho__nome {
+  margin: 0;
+  font-size: 1.35rem;
+}
+.carrinho__nome a {
+  color: var(--cor-texto);
+  text-decoration: none;
+}
+.carrinho__detalhe {
+  margin: 0.15rem 0 0.5rem;
+  color: var(--cor-texto-suave);
+}
+.carrinho__alerta {
+  margin: 0 0 0.5rem;
+  color: #7a1c2c;
+  font-weight: 700;
+}
+.carrinho__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+.carrinho__info {
+  min-width: 0;   /* deixa a coluna encolher em vez de vazar da tela */
+}
+.carrinho__quantidade {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.carrinho__subtotal {
+  grid-column: 2;
+  margin: 0;
+  font-weight: 700;
+}
+
+/* Botão com cara de link (ações secundárias: Atualizar, Remover). */
+.botao-texto {
+  padding: 0.25rem 0;
+  border: 0;
+  background: none;
+  color: var(--cor-principal-escura);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.botao-texto--remover {
+  color: var(--cor-texto-suave);
+}
+
+.carrinho__resumo {
+  max-width: 24rem;
+  margin: 2rem 0 0 auto;
+}
+.carrinho__total {
+  font-size: 1.4rem;
+  margin-bottom: 0.25rem;
+}
+
+/* 7.7) Checkout e confirmação --------------------------------------------- */
+/* No celular: formulário e resumo um embaixo do outro. */
+.checkout {
+  display: grid;
+  gap: 2.5rem;
+}
+.checkout__grupo {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  border: 0;
+}
+.checkout__grupo legend {
+  margin-bottom: 0.75rem;
+  font-family: var(--fonte-titulo);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--cor-principal-escura);
+}
+/* Dois campos lado a lado (CEP + UF, número + complemento). */
+.checkout__linha {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 1rem;
+  /* Alinha pela base: se um rótulo quebrar em 2 linhas, os campos continuam lado a lado. */
+  align-items: end;
+}
+.checkout .campo input,
+.checkout .campo select {
+  width: 100%;
+}
+.campo select {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--cor-texto-suave);
+  border-radius: 6px;
+  background: var(--cor-fundo);
+  font: inherit;
+}
+.campo__opcional {
+  font-weight: 400;
+  color: var(--cor-texto-suave);
+}
+.campo--erro input,
+.campo--erro select {
+  border: 2px solid #a3263b;
+}
+.campo__erro {
+  margin: 0.35rem 0 0;
+  color: #7a1c2c;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.aviso-lgpd {
+  padding: 0.85rem 1rem;
+  border-radius: 6px;
+  background: var(--cor-principal-clara);
+  font-size: 0.9rem;
+  color: var(--cor-texto-suave);
+}
+
+.checkout__resumo {
+  align-self: start;
+  padding: 1.5rem;
+  border-radius: var(--raio);
+  background: var(--cor-principal-clara);
+}
+.resumo {
+  margin-bottom: 1rem;
+}
+.resumo__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--cor-borda);
+}
+
+.confirmacao__passo {
+  margin: 1.5rem 0 2rem;
+  padding: 1.5rem;
+  border-radius: var(--raio);
+  background: var(--cor-principal-clara);
+}
+/* Verde-escuro do WhatsApp, com contraste suficiente para texto branco. */
+.botao--whatsapp {
+  background: #12784a;
+  border-color: #12784a;
+}
+
+/* 7.4) Contato ------------------------------------------------------------- */
+.grade--contato {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.cartao--contato {
+  padding: 1.75rem 1.5rem;
+  text-align: center;
+}
+.cartao--contato .cartao__titulo {
+  font-size: 1.7rem;
+  color: var(--cor-principal-escura);
+}
+
+/* 8) Rodapé --------------------------------------------------------------- */
+.rodape {
+  background: var(--cor-principal-escura);
+  color: #fff;
+  padding: 3rem 0 1.5rem;
+}
+.rodape a {
+  color: #fff;
+}
+.rodape__grade {
+  display: grid;
+  gap: 2rem;
+}
+.rodape__lema {
+  margin-top: 0.8rem;
+  font-family: var(--fonte-titulo);
+  font-size: 1.3rem;
+  font-style: italic;
+}
+.rodape__titulo {
+  font-size: 1.3rem;
+}
+.rodape__lista li {
+  margin-bottom: 0.4rem;
+}
+.rodape__copyright {
+  margin: 2rem 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* 9) Animações -------------------------------------------------------------
+   Os elementos com data-revelar começam invisíveis SÓ quando o JavaScript
+   está ativo (classe .js no <html>). Sem JS, tudo aparece normalmente. */
+.js [data-revelar] {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity var(--transicao), transform var(--transicao);
+}
+.js [data-revelar].revelado {
+  opacity: 1;
+  transform: none;
+}
+/* Atraso escalonado: elementos lado a lado surgem um após o outro. */
+.js [data-atraso='1'] { transition-delay: 0.12s; }
+.js [data-atraso='2'] { transition-delay: 0.24s; }
+.js [data-atraso='3'] { transition-delay: 0.36s; }
+
+/* Respeita quem pediu ao sistema para reduzir movimento. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+  }
+  .js [data-revelar] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 10) Telas maiores -------------------------------------------------------- */
+
+/* Tablet (a partir de 640px) */
+@media (min-width: 640px) {
+  :root {
+    --espaco: 1.5rem;
+  }
+  .grade--produtos {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+  .rodape__grade {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* Carrinho: foto | informações | subtotal, em uma linha. */
+  .carrinho__item {
+    grid-template-columns: 96px 1fr auto;
+    align-items: start;
+  }
+  .carrinho__foto img {
+    width: 96px;
+  }
+  .carrinho__subtotal {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 1.15rem;
+  }
+}
+
+/* Desktop (a partir de 1024px): menu fica sempre visível, em linha. */
+@media (min-width: 1024px) {
+  :root {
+    --altura-cabecalho: 84px;
+  }
+  .menu-botao {
+    display: none;
+  }
+  .menu {
+    position: static;
+    display: block;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+  .menu__lista {
+    flex-direction: row;
+    gap: 2rem;
+    padding: 0;
+  }
+  .menu__link {
+    padding: 0.25rem 0;
+    border-bottom: 2px solid transparent;
+  }
+  .menu__link:hover {
+    border-bottom-color: var(--cor-principal);
+  }
+  .cabecalho__logo img {
+    width: 60px;
+    height: 60px;
+  }
+  .secao {
+    padding: 5rem 0;
+  }
+  .secao--topo {
+    padding-top: calc(var(--altura-cabecalho) + 3rem);
+  }
+  /* 4 peças por linha: com 4 destaques, a linha fica completa, sem buraco. */
+  .grade--produtos {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  /* Checkout: formulário à esquerda, resumo à direita. */
+  .checkout {
+    grid-template-columns: 3fr 2fr;
+    gap: 3.5rem;
+  }
+  /* Página do produto: foto à esquerda, informações à direita. */
+  .produto__grade {
+    grid-template-columns: 1fr 1fr;
+    gap: 3.5rem;
+    align-items: start;
+  }
+  .menu__link[aria-current='page'] {
+    border-bottom-color: var(--cor-principal-escura);
+  }
+}

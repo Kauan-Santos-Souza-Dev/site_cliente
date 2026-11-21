@@ -1,0 +1,14 @@
+{% comment %}
+  Um campo de formulário com rótulo e erro, reutilizado no checkout:
+    {% include 'pedidos/_campo.html' with field=form.cep %}
+  field.id_for_label liga o <label> ao campo (clicar no rótulo foca o campo,
+  e o leitor de tela lê o rótulo). O Django marca o campo com erro usando
+  aria-invalid e o liga à mensagem de erro com aria-describedby.
+{% endcomment %}
+<div class="campo{% if field.errors %} campo--erro{% endif %}">
+  <label for="{{ field.id_for_label }}">{{ field.label }}{% if not field.field.required %} <span class="campo__opcional">(opcional)</span>{% endif %}</label>
+  {{ field }}
+  {% if field.errors %}
+    <p class="campo__erro" id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</p>
+  {% endif %}
+</div>
