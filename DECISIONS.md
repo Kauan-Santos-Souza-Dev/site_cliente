@@ -2,7 +2,7 @@
 
 Cada decisão: o que foi escolhido, por quê e quais alternativas foram descartadas.
 
-O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi tomada:
+O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi tomada. As decisões 1 a 50 são da v1 ("Etapa N"); a partir da 51, da v2 ("v2 Etapa N"):
 
 | Etapa | Assunto | Decisões |
 |---|---|---|
@@ -14,6 +14,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | 6 | Carrinho na sessão | 35 a 40 |
 | 7 | Pedido, checkout e WhatsApp | 41 a 46 |
 | 8 | Testes, revisão de segurança e documentação | 47 a 50 |
+| v2 · 1 | Preparação da v2: versionamento e escolha do gateway | 51 e 52 |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -252,3 +253,17 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - Os limites (API e pedidos) usam cache em memória, por processo.
   - O e-mail de contato ainda não foi confirmado com a loja.
   - Os pedidos guardam nome, telefone e endereço sem exclusão automática. A página de Privacidade promete guardar os dados só "pelo tempo necessário" para a entrega e as trocas. Por isso, a loja deve apagar no admin, de tempos em tempos, os pedidos enviados ou cancelados antigos, e também quando a cliente pedir.
+
+## 51. Tag `v1.0` e branch `v2` — v2 Etapa 1
+- **Escolha:** a v1 concluída foi marcada com a tag anotada `v1.0` (commit `f29a01a`). A v2 é desenvolvida na branch `v2`, criada a partir dela. Tag e branch ficaram só locais (o push fica a critério do Kauan).
+- **Por quê:** a tag é um "marcador fixo": dá para voltar exatamente ao código da v1 (`git switch --detach v1.0`) mesmo depois de a v2 mudar tudo. A tag **anotada** (`-a`) guarda autor, data e mensagem, ao contrário da tag "leve", que é só um nome.
+- **Descartado:** reaproveitar a branch `feature/loginPagamentos` — o nome cobre só parte do escopo; `v2` deixa claro que a branch é a versão inteira.
+
+## 52. Critérios e pesquisa para escolher o gateway — v2 Etapa 1
+- **Critérios, em ordem:** (1) aceitar conta de **pessoa física** (a loja não tem CNPJ); (2) **cartão sem passar pelo nosso servidor** (checkout hospedado ou tokenização no navegador); (3) **Pix dinâmico com webhook** e forma clara de provar que o aviso veio do gateway; (4) sandbox; (5) SDK Python oficial e boa documentação (o projeto é de estudo); (6) taxas.
+- **Resultado da pesquisa (nov/2026, documentação oficial e materiais dos gateways; taxas mudam, conferir antes de assinar):**
+  - **Mercado Pago:** aceita CPF; Pix 0,99%; cartão ~4,98% (receber na hora) a ~3,99% (30 dias); cartão pelo **Checkout Pro** (página do Mercado Pago, com limite de parcelas configurável na preferência); Pix pela API devolve o QR Code e o "copia e cola"; webhook assinado com **HMAC** (cabeçalho `x-signature` + segredo); SDK Python oficial; sandbox com contas de teste.
+  - **Asaas:** aceita CPF; Pix com tarifa fixa por cobrança (R$ 1,99 para pessoa física após os 3 primeiros meses); cartão ~R$ 0,49 + 2,99% a 3,99%, recebimento em 32 dias; webhook autenticado por **token fixo** no cabeçalho; **sem SDK Python oficial** (REST com `requests`); o cartão pela API envia os dados do cartão pelo nosso servidor, então seria preciso usar a fatura hospedada do Asaas.
+  - **Efí:** aceita CPF; Pix 1,19%; SDK Python oficial (`efipay`); exige certificado `.p12`/`.pem` nas chamadas e **mTLS** no webhook (há o modo *skip-mTLS* com HMAC na URL), o que complica o desenvolvimento local com túnel; tarifas de cartão não publicadas.
+  - **Pagar.me:** abertura de conta exige **CNPJ ou MEI** (Stone). **Eliminado** pelo critério 1.
+- **Recomendação:** Mercado Pago (detalhes na resposta da v2 Etapa 1). **A escolha é do Kauan/da loja** e será registrada numa decisão própria.

@@ -3,8 +3,15 @@
 Site de uma loja de roupas femininas (vestidos, saias e conjuntos) com temática cristã.
 Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, Django e Django REST Framework.
 
-> Status: **v1 concluída** (etapas 1 a 8). Antes de publicar, siga o [checklist](#checklist-antes-de-publicar).
+> Status: **v1 concluída** (etapas 1 a 8, tag `v1.0`). **v2 em desenvolvimento** na branch `v2`
+> (pagamento online, contas de clientes e parcelamento): etapa 1 de 9 concluída.
 > O roteiro completo está no [CLAUDE.md](CLAUDE.md) e as decisões técnicas em [DECISIONS.md](DECISIONS.md).
+
+## Versões
+| Versão | Onde está | O que tem |
+|---|---|---|
+| v1.0 | tag `v1.0` (`git switch --detach v1.0` para ver) | Catálogo, carrinho na sessão, pedido enviado pelo WhatsApp, API de leitura, admin |
+| v2 | branch `v2` | Tudo da v1 + contas de clientes, Pix, cartão parcelado e parcelamento configurável (em andamento) |
 
 ## Requisitos
 - Python 3.12 ou superior (desenvolvido com 3.14)
@@ -270,9 +277,9 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] Se houver proxy (Nginx, Cloudflare...), configurar o IP real da visitante. Sem isso, o limite de pedidos trataria todas as clientes como um único IP.
 - [ ] Rodar `python manage.py test` uma última vez.
 
-## Ideias para a v2
-- Cálculo de frete (o campo `Order.shipping_cost` já existe).
-- Pagamento online (gateway, Pix automático).
-- Conversão automática das fotos para WebP no upload.
-- Bloqueio de tentativas repetidas de login no admin (ex.: `django-axes`).
-- Preenchimento do endereço pelo CEP (ViaCEP).
+## Roteiro da v2
+O escopo e as etapas da v2 estão no [CLAUDE.md](CLAUDE.md#etapas-do-roteiro-da-v2). Cada etapa concluída ganha
+uma subseção em "Fluxo de cada parte".
+
+Ideias que ficaram fora da v2 (podem entrar numa v3): conversão automática das fotos para WebP no upload e
+preenchimento do endereço pelo CEP (ViaCEP).
