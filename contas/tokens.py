@@ -1,4 +1,4 @@
-"""Token do link de verificação de e-mail (decisão 72).
+"""Tokens dos links enviados por e-mail: verificação (decisão 72) e troca de e-mail (decisão 81).
 
 Como funciona, sem guardar nada no banco:
 `signing.dumps` transforma um pequeno dicionário em texto e "assina" esse
@@ -41,3 +41,41 @@ def get_user_from_verification_token(token):
         return None
     User = get_user_model()
     return User.objects.filter(pk=payload.get('uid'), email=payload.get('email')).first()
+
+
+# ---------------------------------------------------------------------------
+# Troca de e-mail em "Minha conta" (decisão 81)
+# ---------------------------------------------------------------------------
+# Mesmo mecanismo do link de verificação, com OUTRO sal: um token de
+# verificação não serve para trocar e-mail, e vice-versa.
+EMAIL_CHANGE_SALT = 'contas.troca-email'
+EMAIL_CHANGE_MAX_AGE = 60 * 60 * 24
+
+
+def make_email_change_token(user, new_email):
+    """Cria o token do link enviado ao NOVO e-mail.
+
+    Leva o e-mail ATUAL também: se a conta trocar de e-mail por outro
+    caminho antes do clique, este link deixa de valer.
+    """
+    payload = {'uid': user.pk, 'old': user.email, 'new': new_email}
+    return signing.dumps(payload, salt=EMAIL_CHANGE_SALT)
+
+
+def read_email_change_token(token):
+    """Devolve (conta, novo_email), ou (None, None) se o token não vale.
+
+    Não vale quando: foi adulterado, passou de 24 horas, ou o e-mail atual
+    da conta já não é o que estava no token (link antigo ou já usado).
+    """
+    try:
+        payload = signing.loads(token, salt=EMAIL_CHANGE_SALT, max_age=EMAIL_CHANGE_MAX_AGE)
+    except signing.BadSignature:
+        return None, None
+    User = get_user_model()
+    user = User.objects.filter(
+        pk=payload.get('uid'), email=payload.get('old'), is_active=True
+    ).first()
+    if user is None:
+        return None, None
+    return user, payload.get('new')

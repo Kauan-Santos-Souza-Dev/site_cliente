@@ -38,6 +38,29 @@ urlpatterns = [
     path('verificacao-pendente/', views.verification_pending, name='verification_pending'),
     path('verificacao-pendente/reenviar/', views.resend_verification, name='resend_verification'),
 
+    # --- Minha conta (v2 Etapa 4, LGPD) --------------------------------------
+    # Nenhuma rota tem id de conta: todas agem sobre a conta logada (contra IDOR).
+    path('minha-conta/', views.account, name='account'),
+    path('minha-conta/dados/', views.account_edit, name='account_edit'),
+    path('minha-conta/email/', views.email_change, name='email_change'),
+    path('minha-conta/email/confirmar/<str:token>/', views.email_change_confirm, name='email_change_confirm'),
+    # Trocar a senha: view pronta do Django (mesmo motivo da decisão 65). Ela
+    # pede a senha atual e mantém a cliente logada NESTE aparelho, derrubando
+    # as sessões abertas em outros.
+    path(
+        'minha-conta/senha/',
+        auth_views.PasswordChangeView.as_view(template_name='contas/password_change.html'),
+        name='password_change',
+    ),
+    path(
+        'minha-conta/senha/alterada/',
+        auth_views.PasswordChangeDoneView.as_view(template_name='contas/password_change_done.html'),
+        name='password_change_done',
+    ),
+    path('minha-conta/exportar/', views.account_export, name='account_export'),
+    path('minha-conta/excluir/', views.account_delete, name='account_delete'),
+    path('conta-excluida/', views.account_deleted, name='account_deleted'),
+
     # --- Esqueci a senha (decisão 74) ---------------------------------------
     # 1) formulário do e-mail  2) "se houver conta, enviamos"  3) link do
     # e-mail com a nova senha  4) "senha alterada". Os nomes das rotas são os

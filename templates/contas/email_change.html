@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{# Pedido de troca de e-mail (view contas.views.email_change, decisão 81). #}
+
+{% block title %}Trocar e-mail — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta">
+    <h1 class="secao__titulo">Trocar e-mail</h1>
+    <p>E-mail atual: <strong>{{ user.email }}</strong></p>
+    <form class="conta__form" method="post" novalidate>
+      {% csrf_token %}
+      {% include 'pedidos/_campo.html' with field=form.new_email %}
+      {% include 'pedidos/_campo.html' with field=form.password %}
+      <p class="aviso-lgpd">Vamos enviar um link para o novo endereço. O e-mail da conta só muda quando você abrir esse link (ele vale por 24 horas).</p>
+      <button class="botao botao--largo" type="submit">Enviar link</button>
+    </form>
+    <p class="conta__alternativa"><a href="{% url 'account' %}">Voltar para Minha conta</a></p>
+  </div>
+</section>
+{% endblock %}

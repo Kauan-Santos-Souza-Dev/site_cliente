@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{# Corrigir nome e sobrenome (view contas.views.account_edit). #}
+
+{% block title %}Corrigir dados — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta">
+    <h1 class="secao__titulo">Corrigir dados</h1>
+    <form class="conta__form" method="post" novalidate>
+      {% csrf_token %}
+      <div class="checkout__linha">
+        {% include 'pedidos/_campo.html' with field=form.first_name %}
+        {% include 'pedidos/_campo.html' with field=form.last_name %}
+      </div>
+      <button class="botao botao--largo" type="submit">Salvar</button>
+    </form>
+    <p class="conta__alternativa"><a href="{% url 'account' %}">Voltar para Minha conta</a></p>
+  </div>
+</section>
+{% endblock %}

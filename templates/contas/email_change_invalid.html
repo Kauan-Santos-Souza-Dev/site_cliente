@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{# Link de troca de e-mail inválido, vencido ou já usado (view contas.views.email_change_confirm). #}
+
+{% block title %}Link inválido — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Este link não vale mais</h1>
+    <p>O link pode ter passado de 24 horas, já ter sido usado ou não poder ser aplicado a esta conta.
+      Se ainda quiser trocar o e-mail, peça um link novo em Minha conta.</p>
+    <a class="botao botao--largo" href="{% url 'account' %}">Ir para Minha conta</a>
+  </div>
+</section>
+{% endblock %}

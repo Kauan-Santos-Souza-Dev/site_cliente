@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{# Link de troca de e-mail aberto com sucesso (view contas.views.email_change_confirm). #}
+
+{% block title %}E-mail alterado — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">E-mail alterado!</h1>
+    <p>A partir de agora, use o novo endereço para entrar. Avisamos o endereço antigo sobre a troca.</p>
+    {% if user.is_authenticated %}
+      <a class="botao botao--largo" href="{% url 'account' %}">Ir para Minha conta</a>
+    {% else %}
+      <a class="botao botao--largo" href="{% url 'login' %}">Entrar</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

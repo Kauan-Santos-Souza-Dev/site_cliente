@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{# Excluir a conta (view contas.views.account_delete, decisão 78). #}
+
+{% block title %}Excluir conta — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Excluir minha conta</h1>
+    <p>Ao excluir a conta:</p>
+    <ul class="lista-simples">
+      <li>seu nome e seu e-mail são apagados e a conta deixa de funcionar;</li>
+      <li>você sai do site em todos os aparelhos;</li>
+      <li>os pedidos já feitos continuam registrados pelo prazo explicado na <a href="{% url 'privacy' %}">Política de Privacidade</a>; depois disso, os dados pessoais deles também são apagados.</li>
+    </ul>
+    <p>Se quiser uma cópia dos seus dados, <a href="{% url 'account' %}">baixe o arquivo em Minha conta</a> antes de excluir.</p>
+
+    <form class="conta__form" method="post" novalidate>
+      {% csrf_token %}
+      {% include 'pedidos/_campo.html' with field=form.password %}
+      {% include 'contas/_caixa.html' with field=form.confirm %}
+      <button class="botao botao--largo botao--perigo" type="submit">Excluir minha conta</button>
+    </form>
+    <p class="conta__alternativa"><a href="{% url 'account' %}">Cancelar e voltar</a></p>
+  </div>
+</section>
+{% endblock %}

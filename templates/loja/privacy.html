@@ -1,7 +1,13 @@
 {% extends 'base.html' %}
 {% comment %}
   Política de Privacidade (LGPD — Lei 13.709/2018), em linguagem simples.
-  Se a loja passar a coletar outros dados, esta página precisa ser atualizada.
+  RASCUNHO: precisa de revisão por quem entende de direito antes da publicação
+  (decisão 84). Ao mudar o texto, troque PRIVACY_POLICY_VERSION em
+  contas/legal.py: os aceites gravados guardam a versão lida.
+
+  Base: o inventário de dados do README ("Dados pessoais que o site guarda").
+  Se o site passar a guardar outro dado, atualize as duas coisas.
+  Os prazos vêm de contas/legal.py (variáveis order_retention_years etc.).
 {% endcomment %}
 
 {% block title %}Política de Privacidade — Elegância Cristã{% endblock %}
@@ -10,34 +16,124 @@
 {% block content %}
 <section class="secao secao--topo">
   <div class="container texto-pagina">
+    <p class="faixa-rascunho" role="note"><strong>RASCUNHO</strong> — texto pendente de revisão jurídica.</p>
     <h1 class="secao__titulo">Política de Privacidade</h1>
-    <p class="texto-pagina__data">Última atualização: novembro de 2026.</p>
+    <p class="texto-pagina__data">Versão {{ privacy_version }}.</p>
 
-    <h2>Quais dados coletamos</h2>
-    <p>Só pedimos o necessário para entregar o seu pedido. Ao finalizar uma compra, você informa:</p>
+    <p>Esta página explica, em linguagem simples, quais dados pessoais a Elegância Cristã guarda, para quê, com quem compartilha, por quanto tempo e como você exerce os seus direitos pela Lei Geral de Proteção de Dados (LGPD, Lei 13.709/2018).</p>
+
+    <h2>1. Quem cuida dos seus dados</h2>
+    <p>A Elegância Cristã é uma loja de pequeno porte, que ainda não tem CNPJ. Ela é a <strong>controladora</strong> dos dados: decide como eles são usados.</p>
     <ul class="lista-simples">
-      <li>nome;</li>
-      <li>telefone/WhatsApp;</li>
-      <li>endereço de entrega (CEP, rua, número, complemento, bairro, cidade e UF).</li>
+      <li>Responsável: {{ STORE_LEGAL_NAME|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>CNPJ: {{ STORE_CNPJ|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>Endereço comercial: {{ STORE_ADDRESS|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>Contato para assuntos de privacidade: <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a></li>
     </ul>
-    <p>Não pedimos CPF, e-mail, data de nascimento nem dados de cartão. Você não precisa criar conta.</p>
 
-    <h2>Para que usamos</h2>
+    <h2>2. Quais dados guardamos e para quê</h2>
+    <div class="tabela-rolagem">
+      <table class="tabela-simples">
+        <caption class="visualmente-oculto">Dados guardados, finalidade e base legal</caption>
+        <thead>
+          <tr><th scope="col">Dado</th><th scope="col">Para quê</th><th scope="col">Base legal (LGPD)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Nome, sobrenome, e-mail e senha da conta</td>
+            <td>Criar e manter a sua conta, identificar você nos pedidos e enviar e-mails da conta (confirmação, troca de senha). A senha é guardada só como um código irreversível (hash): nem a loja consegue lê-la.</td>
+            <td>Execução de contrato (art. 7º, V)</td>
+          </tr>
+          <tr>
+            <td>Se o e-mail foi confirmado e quando enviamos o último e-mail da conta</td>
+            <td>Garantir que o e-mail é seu e evitar envio repetido de e-mails.</td>
+            <td>Execução de contrato (art. 7º, V)</td>
+          </tr>
+          <tr>
+            <td>Registro do aceite (versão dos textos, data e hora)</td>
+            <td>Provar quais versões da Política e dos Termos você aceitou.</td>
+            <td>Exercício regular de direitos (art. 7º, VI; art. 8º, § 2º)</td>
+          </tr>
+          <tr>
+            <td>Nome, telefone/WhatsApp e endereço de entrega do pedido</td>
+            <td>Separar, entregar e conversar com você sobre o pedido.</td>
+            <td>Execução de contrato (art. 7º, V)</td>
+          </tr>
+          <tr>
+            <td>Tentativas de login: e-mail digitado, endereço IP, navegador e horário</td>
+            <td>Bloquear quem tenta adivinhar senhas.</td>
+            <td>Legítimo interesse, para a segurança da sua conta (art. 7º, IX)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Não pedimos nem guardamos:</strong> CPF, data de nascimento ou dados de cartão. Quando o pagamento online for ativado, os dados do cartão serão digitados na página do Mercado Pago e não passarão pelo nosso site.</p>
+
+    <h2>3. Com quem compartilhamos</h2>
+    <p>Não vendemos nem alugamos seus dados, e não os usamos para propaganda. Alguns serviços tratam dados em nosso nome (<strong>operadores</strong>), só para a finalidade indicada:</p>
     <ul class="lista-simples">
-      <li>Registrar o seu pedido e separar as peças;</li>
-      <li>conversar com você pelo WhatsApp para combinar frete e pagamento;</li>
-      <li>enviar o pedido ao endereço informado.</li>
+      <li><strong>Mercado Pago</strong> — processamento de pagamentos (Pix e cartão), quando o pagamento online for ativado.</li>
+      <li><strong>Brevo</strong> — envio dos e-mails da conta (confirmação de e-mail, troca de senha e avisos).</li>
+      <li><strong>Hospedagem do site</strong> — <span class="marca-provisoria">PROVISÓRIO: empresa ainda não definida.</span> Esta seção será atualizada quando a hospedagem for escolhida.</li>
     </ul>
-    <p>Não vendemos nem compartilhamos seus dados para publicidade. Eles só são repassados à transportadora ou aos Correios, quando necessário para a entrega.</p>
+    <p>Além disso, para a entrega, nome e endereço são informados à transportadora ou aos Correios. Se você falar com a gente pelo WhatsApp ou pelo Instagram, a conversa também segue as regras desses aplicativos.</p>
+    <p>Alguns desses serviços podem guardar dados fora do Brasil. Nesses casos, seguimos as regras de transferência internacional da LGPD (art. 33).</p>
 
-    <h2>Cookies</h2>
-    <p>O site usa apenas cookies essenciais: um para guardar o seu carrinho enquanto você navega e outro de segurança, que protege os formulários. Não usamos cookies de propaganda nem de rastreamento.</p>
+    <h2 id="cookies">4. Cookies</h2>
+    <p>O site usa só cookies <strong>estritamente necessários</strong>, sem os quais ele não funciona. Não usamos cookies de propaganda, de análise ou de rastreamento, nem de outras empresas.</p>
+    <div class="tabela-rolagem">
+      <table class="tabela-simples">
+        <caption class="visualmente-oculto">Cookies usados pelo site</caption>
+        <thead>
+          <tr><th scope="col">Nome</th><th scope="col">Para quê</th><th scope="col">Duração</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>sessionid</code></td><td>Guarda o seu carrinho e mantém você conectada. O cookie leva só um código aleatório; os dados ficam no nosso servidor.</td><td>14 dias, ou até você sair da conta</td></tr>
+          <tr><td><code>csrftoken</code></td><td>Segurança: impede que outro site envie formulários em seu nome.</td><td>1 ano</td></tr>
+          <tr><td><code>messages</code></td><td>Mostra avisos como “produto adicionado ao carrinho”.</td><td>Até a próxima página</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Quando você clica em “Entendi” no aviso de cookies, o navegador guarda essa escolha no próprio aparelho (armazenamento local), só para não mostrar o aviso de novo. Essa informação não é enviada ao nosso site.</p>
 
-    <h2>Por quanto tempo guardamos</h2>
-    <p>Pelo tempo necessário para concluir a entrega e atender a eventuais trocas, ou enquanto a lei exigir.</p>
+    <h2>5. Por quanto tempo guardamos</h2>
+    <div class="tabela-rolagem">
+      <table class="tabela-simples">
+        <caption class="visualmente-oculto">Prazos de retenção</caption>
+        <thead>
+          <tr><th scope="col">Dado</th><th scope="col">Prazo</th><th scope="col">Por quê</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Conta</td><td>Enquanto você mantiver a conta. Ao excluir, nome e e-mail são apagados na hora.</td><td>LGPD, arts. 15, 16 e 18, VI</td></tr>
+          <tr><td>Nome, telefone e endereço dos pedidos</td><td>{{ order_retention_years }} anos a partir do pedido; depois são apagados (ficam só cidade, UF, peças e valores).</td><td>Defesa em eventual reclamação: o Código de Defesa do Consumidor dá 5 anos para pedir reparação (art. 27). LGPD, art. 16, I, e art. 7º, VI.</td></tr>
+          <tr><td>Conta que nunca confirmou o e-mail</td><td>{{ unverified_days }} dias, depois é apagada.</td><td>Não guardar o que não é usado (LGPD, art. 6º, III).</td></tr>
+          <tr><td>Tentativas de login</td><td>{{ login_attempt_days }} dias.</td><td>Segurança da conta (LGPD, art. 7º, IX).</td></tr>
+          <tr><td>Histórico de logins bem-sucedidos</td><td>Não guardamos.</td><td>Não é necessário.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Como a limpeza acontece hoje:</strong> a remoção dos dados vencidos é feita por um comando que, por enquanto, é executado <strong>manualmente</strong>. O agendamento automático depende da hospedagem, que ainda será definida. Por isso, um dado pode ficar guardado alguns dias além do prazo até a próxima execução.</p>
+    <p><strong>Cópias de segurança (backups):</strong> o banco de dados terá cópias de segurança para recuperar o site em caso de falha. Um dado apagado ou anonimizado pode continuar numa cópia antiga até ela ser descartada. <span class="marca-provisoria">PROVISÓRIO: as cópias serão guardadas por até 30 dias; o prazo será confirmado quando a hospedagem for definida.</span> As cópias não são usadas para nenhuma outra finalidade.</p>
 
-    <h2>Seus direitos</h2>
-    <p>Pela LGPD, você pode pedir a qualquer momento para ver, corrigir ou apagar os seus dados. Basta falar com a gente pelo <a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">WhatsApp</a> ou pelo e-mail <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a>.</p>
+    <h2>6. Como protegemos</h2>
+    <ul class="lista-simples">
+      <li>Senhas guardadas só como hash (Argon2), nunca em texto;</li>
+      <li>conexão protegida (HTTPS) quando o site estiver no ar;</li>
+      <li>bloqueio temporário depois de várias tentativas de senha erradas;</li>
+      <li>painel da loja com verificação em duas etapas e acesso só da dona.</li>
+    </ul>
+
+    <h2>7. Seus direitos</h2>
+    <p>Pela LGPD (art. 18), você pode: confirmar se tratamos seus dados, ter acesso a eles, corrigi-los, pedir a anonimização ou a exclusão do que não for necessário, receber uma cópia (portabilidade), saber com quem compartilhamos e revogar o consentimento, quando ele for a base do tratamento.</p>
+    <ul class="lista-simples">
+      <li>Na página <a href="{% url 'account' %}">Minha conta</a> você mesma vê e corrige seus dados, troca o e-mail e a senha, baixa uma cópia dos dados (arquivo JSON) e exclui a conta.</li>
+      <li>Para qualquer outro pedido, escreva para <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a>. Respondemos em até 15 dias (LGPD, art. 19, II).</li>
+      <li>Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD).</li>
+    </ul>
+    <p><strong>Excluir a conta</strong> apaga seu nome e seu e-mail na hora. Os pedidos já feitos continuam registrados pelo prazo da seção 5, porque a loja pode precisar deles para responder a uma reclamação.</p>
+
+    <h2>8. Mudanças nesta política</h2>
+    <p>Quando esta política mudar, a versão no topo da página muda também. Guardamos qual versão você aceitou no cadastro.</p>
   </div>
 </section>
 {% endblock %}

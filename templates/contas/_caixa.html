@@ -1,0 +1,14 @@
+{% comment %}
+  Caixa de marcar (checkbox) com rótulo e erro. Uso:
+    {% include 'contas/_caixa.html' with field=form.confirm %}
+  A caixa NUNCA vem marcada por padrão (o campo do formulário não tem initial).
+  O rótulo vem do label do campo; o cadastro usa um rótulo próprio com links
+  (ver signup.html).
+{% endcomment %}
+<div class="campo campo--caixa{% if field.errors %} campo--erro{% endif %}">
+  {{ field }}
+  <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {% if field.errors %}
+    <p class="campo__erro" id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</p>
+  {% endif %}
+</div>

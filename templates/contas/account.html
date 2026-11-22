@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% comment %}
+  Painel "Minha conta" (view contas.views.account).
+  Mostra TUDO que a loja guarda da conta (LGPD art. 18 II: acesso aos dados).
+  Sempre os dados de "user", a conta logada: não existe id na URL.
+{% endcomment %}
+
+{% block title %}Minha conta — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Minha conta</h1>
+
+    <h2>Seus dados</h2>
+    <dl class="dados">
+      <dt>Nome</dt>
+      <dd>{{ user.first_name }} {{ user.last_name }}</dd>
+      <dt>E-mail</dt>
+      <dd>{{ user.email }} {% if user.email_verified %}(confirmado){% else %}(não confirmado){% endif %}</dd>
+      <dt>Conta criada em</dt>
+      <dd>{{ user.date_joined|date:"d/m/Y" }}</dd>
+    </dl>
+    <ul class="lista-simples">
+      <li><a href="{% url 'account_edit' %}">Corrigir nome</a></li>
+      <li><a href="{% url 'email_change' %}">Trocar e-mail</a></li>
+      <li><a href="{% url 'password_change' %}">Trocar senha</a></li>
+    </ul>
+
+    <h2>Termos aceitos</h2>
+    {% if consents %}
+      <ul class="lista-simples">
+        {% for consent in consents %}
+          <li>Política de Privacidade (versão {{ consent.privacy_policy_version }}) e Termos de Uso (versão {{ consent.terms_version }}), aceitos em {{ consent.accepted_at|date:"d/m/Y H:i" }}.</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Nenhum aceite registrado (conta criada antes desta funcionalidade).</p>
+    {% endif %}
+
+    <h2>Seus direitos (LGPD)</h2>
+    <p>Você pode baixar uma cópia dos seus dados ou excluir a sua conta. Veja como cuidamos dos seus dados na <a href="{% url 'privacy' %}">Política de Privacidade</a>.</p>
+
+    {# POST com CSRF: um link em outro site não consegue disparar o download com a sessão da cliente. #}
+    <form method="post" action="{% url 'account_export' %}">
+      {% csrf_token %}
+      <button class="botao botao--largo" type="submit">Baixar meus dados (arquivo JSON)</button>
+    </form>
+
+    {# Contas do admin não se excluem pelo site (ver a view account_delete). #}
+    {% if not user.is_staff %}
+      <p class="conta__alternativa"><a class="link-perigo" href="{% url 'account_delete' %}">Excluir minha conta</a></p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

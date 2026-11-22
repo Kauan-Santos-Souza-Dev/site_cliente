@@ -9,6 +9,8 @@ fica todo visível de cima para baixo (ver DECISIONS.md).
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 
+from contas import legal
+
 from .models import Category, Product
 
 # Quantos produtos aparecem por página no catálogo.
@@ -96,5 +98,24 @@ def contact(request):
 
 
 def privacy(request):
-    """Página de Política de Privacidade (LGPD)."""
-    return render(request, 'loja/privacy.html')
+    """Página de Política de Privacidade (LGPD). Rascunho para revisão jurídica."""
+    return render(request, 'loja/privacy.html', legal_context())
+
+
+def terms(request):
+    """Página de Termos de Uso. Rascunho para revisão jurídica."""
+    return render(request, 'loja/terms.html', legal_context())
+
+
+def legal_context():
+    """Versões e prazos usados nos textos legais, vindos de contas/legal.py.
+
+    Assim o número da versão na página é SEMPRE o mesmo gravado no aceite.
+    """
+    return {
+        'privacy_version': legal.PRIVACY_POLICY_VERSION,
+        'terms_version': legal.TERMS_VERSION,
+        'order_retention_years': legal.ORDER_RETENTION.days // 365,
+        'unverified_days': legal.UNVERIFIED_ACCOUNT_RETENTION.days,
+        'login_attempt_days': legal.LOGIN_ATTEMPT_RETENTION.days,
+    }

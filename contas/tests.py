@@ -1,5 +1,7 @@
 """Testes das contas: cadastro, verificação de e-mail, login, bloqueio de
-tentativas, redefinição de senha, 2FA do admin e grupo de permissões.
+tentativas, redefinição de senha, 2FA do admin, grupo de permissões e,
+desde a v2 Etapa 4, LGPD (aceite, Minha conta, exportar, excluir/anonimizar,
+limpeza de dados antigos, páginas legais e aviso de cookies).
 
 Cada teste roda num banco de testes vazio, criado e apagado pelo Django.
 self.client é um "navegador de mentira": faz requisições sem abrir servidor.
@@ -8,18 +10,21 @@ Os e-mails não saem de verdade: nos testes o Django os guarda em
 """
 
 import io
+import json
 import re
 import time
 from datetime import timedelta
 from unittest import mock
 
-from axes.models import AccessAttempt
+from axes.models import AccessAttempt, AccessLog
 from django.conf import settings
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth import SESSION_KEY, get_user_model
 from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from django.core import mail
 from django.core.management import CommandError, call_command
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from django_otp.oath import totp
@@ -28,9 +33,12 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from carrinho.cart import CART_SESSION_KEY
 from loja.models import Category, Product, ProductVariant
+from pedidos.models import Order
 
+from .legal import ORDER_RETENTION, PRIVACY_POLICY_VERSION, TERMS_VERSION
+from .models import Consent
 from .test_utils import GOOD_PASSWORD, login_admin, make_customer
-from .tokens import make_verification_token
+from .tokens import make_email_change_token, make_verification_token
 
 User = get_user_model()
 
@@ -40,6 +48,9 @@ SIGNUP_DATA = {
     'email': 'Maria.Souza@Example.com',
     'password1': GOOD_PASSWORD,
     'password2': GOOD_PASSWORD,
+    # Caixa de aceite dos Termos e da Política (v2 Etapa 4). Um checkbox
+    # marcado chega ao servidor como "on".
+    'accept_terms': 'on',
 }
 
 
@@ -679,3 +690,412 @@ class GroupsCommandTest(TestCase):
         login_admin(self.client, staff)
         self.assertEqual(self.client.get(reverse('admin:loja_product_changelist')).status_code, 200)
         self.assertEqual(self.client.get(reverse('admin:contas_user_changelist')).status_code, 403)
+
+
+# ===========================================================================
+# v2 Etapa 4 — LGPD
+# ===========================================================================
+
+class ConsentSignupTest(TestCase):
+    """Aceite dos Termos e da Política no cadastro (decisão 77)."""
+
+    def test_caixa_vem_desmarcada(self):
+        response = self.client.get(reverse('signup'))
+        # Acha a tag <input ... name="accept_terms" ...> e confere que não tem "checked".
+        tag = re.search(r'<input[^>]*name="accept_terms"[^>]*>', response.content.decode()).group(0)
+        self.assertIn('type="checkbox"', tag)
+        self.assertNotIn('checked', tag)
+
+    def test_sem_marcar_a_caixa_nao_cria_conta(self):
+        data = {**SIGNUP_DATA}
+        del data['accept_terms']  # checkbox desmarcado simplesmente não é enviado
+        response = self.client.post(reverse('signup'), data)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'é preciso ler e aceitar os Termos de Uso')
+        self.assertFalse(User.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_marcando_grava_versoes_e_data_do_aceite(self):
+        before = timezone.now()
+        self.client.post(reverse('signup'), SIGNUP_DATA)
+        user = User.objects.get(email='maria.souza@example.com')
+        consent = Consent.objects.get(user=user)
+        self.assertEqual(consent.privacy_policy_version, PRIVACY_POLICY_VERSION)
+        self.assertEqual(consent.terms_version, TERMS_VERSION)
+        self.assertGreaterEqual(consent.accepted_at, before)
+
+    def test_cadastro_refeito_em_conta_nao_verificada_grava_novo_aceite(self):
+        make_customer(email='maria.souza@example.com', verified=False)
+        self.client.post(reverse('signup'), SIGNUP_DATA)
+        self.assertEqual(Consent.objects.count(), 1)
+
+    def test_conta_verificada_nao_ganha_aceite_e_resposta_e_a_mesma(self):
+        make_customer(email='maria.souza@example.com', verified=True)
+        response = self.client.post(reverse('signup'), SIGNUP_DATA)
+        self.assertRedirects(response, reverse('signup_done'))
+        self.assertFalse(Consent.objects.exists())
+
+
+class AccountPageTest(TestCase):
+    """Página "Minha conta": login obrigatório e só a PRÓPRIA conta."""
+
+    def setUp(self):
+        self.user = make_customer(first_name='Clara', last_name='Lima')
+        self.other = make_customer(email='outra@example.com', first_name='Joana', last_name='Reis')
+
+    def test_todas_as_paginas_exigem_login(self):
+        names = ['account', 'account_edit', 'email_change', 'password_change', 'account_delete']
+        for name in names:
+            with self.subTest(pagina=name):
+                response = self.client.get(reverse(name))
+                self.assertRedirects(response, f"{reverse('login')}?next={reverse(name)}")
+        # A exportação é por POST; sem login também vai para o login.
+        response = self.client.post(reverse('account_export'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_mostra_os_dados_da_propria_conta_e_nao_os_de_outra(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('account'))
+        self.assertContains(response, 'cliente@example.com')
+        self.assertContains(response, 'Clara Lima')
+        self.assertNotContains(response, 'outra@example.com')
+
+    def test_corrigir_nome(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('account_edit'), {'first_name': 'Clarice', 'last_name': 'Lima'}, follow=True
+        )
+        self.assertContains(response, 'Seus dados foram atualizados')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, 'Clarice')
+
+    def test_editar_ignora_campos_que_nao_estao_no_formulario(self):
+        # Mesmo que alguém envie "email" ou "is_staff" à mão, o ModelForm só
+        # usa os campos declarados (nome e sobrenome). Nada de virar admin.
+        self.client.force_login(self.user)
+        self.client.post(reverse('account_edit'), {
+            'first_name': 'Clara', 'last_name': 'Lima',
+            'email': 'hacker@example.com', 'is_staff': 'on',
+        })
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'cliente@example.com')
+        self.assertFalse(self.user.is_staff)
+
+    def test_trocar_senha_pede_a_senha_atual(self):
+        self.client.force_login(self.user)
+        new_password = 'Rosa-de-Saron-77'
+        self.client.post(reverse('password_change'), {
+            'old_password': 'senha-errada-123',
+            'new_password1': new_password, 'new_password2': new_password,
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(GOOD_PASSWORD))
+        self.client.post(reverse('password_change'), {
+            'old_password': GOOD_PASSWORD,
+            'new_password1': new_password, 'new_password2': new_password,
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(new_password))
+
+
+class EmailChangeTest(TestCase):
+    """Troca de e-mail com link enviado ao NOVO endereço (decisão 81)."""
+
+    def setUp(self):
+        self.user = make_customer(first_name='Clara')
+        self.client.force_login(self.user)
+
+    def ask(self, new_email, password=GOOD_PASSWORD):
+        """Pede a troca de e-mail e segue o redirecionamento."""
+        return self.client.post(
+            reverse('email_change'), {'new_email': new_email, 'password': password}, follow=True
+        )
+
+    def test_senha_errada_nao_envia_nada(self):
+        response = self.ask('nova@example.com', password='senha-errada-123')
+        self.assertContains(response, 'Senha incorreta')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_fluxo_completo_troca_o_email_e_avisa_o_antigo(self):
+        response = self.ask('Nova@Example.com')
+        self.assertContains(response, 'Se for possível usar este endereço')
+        # O e-mail ainda NÃO mudou: só muda com o clique no link.
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'cliente@example.com')
+        self.assertEqual(mail.outbox[0].to, ['nova@example.com'])
+
+        response = self.client.get(link_path(find_link(mail.outbox[0])))
+        self.assertContains(response, 'E-mail alterado')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'nova@example.com')
+        self.assertTrue(self.user.email_verified)
+        # Aviso de segurança no endereço antigo.
+        self.assertEqual(mail.outbox[1].to, ['cliente@example.com'])
+
+    def test_email_ja_usado_tem_a_mesma_resposta_e_nao_troca(self):
+        make_customer(email='ocupado@example.com', first_name='Joana')
+        response = self.ask('ocupado@example.com')
+        # Mesma mensagem do caso normal: quem pede não descobre que o e-mail existe.
+        self.assertContains(response, 'Se for possível usar este endereço')
+        # Quem recebe é a DONA do e-mail ocupado, com o aviso de "conta existente",
+        # sem link de troca.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['ocupado@example.com'])
+        self.assertNotIn('/minha-conta/email/confirmar/', mail.outbox[0].body)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'cliente@example.com')
+
+    def test_link_so_vale_uma_vez(self):
+        self.ask('nova@example.com')
+        url = link_path(find_link(mail.outbox[0]))
+        self.assertEqual(self.client.get(url).status_code, 200)
+        # Na segunda vez, o e-mail "antigo" do token já não é o da conta.
+        self.assertEqual(self.client.get(url).status_code, 400)
+
+    def test_token_adulterado_e_recusado(self):
+        self.ask('nova@example.com')
+        url = link_path(find_link(mail.outbox[0])).rstrip('/')
+        tampered = url[:-2] + ('AA' if not url.endswith('AA') else 'BB') + '/'
+        self.assertEqual(self.client.get(tampered).status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'cliente@example.com')
+
+    def test_link_vencido_depois_de_24_horas(self):
+        token = make_email_change_token(self.user, 'nova@example.com')
+        later = time.time() + 24 * 60 * 60 + 1
+        with mock.patch('django.core.signing.time.time', return_value=later):
+            response = self.client.get(reverse('email_change_confirm', args=[token]))
+        self.assertEqual(response.status_code, 400)
+
+    def test_email_ocupado_depois_do_envio_nao_troca(self):
+        token = make_email_change_token(self.user, 'nova@example.com')
+        make_customer(email='nova@example.com')
+        response = self.client.get(reverse('email_change_confirm', args=[token]))
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'cliente@example.com')
+
+
+class ExportDataTest(TestCase):
+    """Exportar os dados da conta em JSON (LGPD art. 18 II e V)."""
+
+    def setUp(self):
+        self.user = make_customer(first_name='Clara', last_name='Lima')
+        Consent.objects.create(user=self.user, privacy_policy_version='v1', terms_version='v1')
+        make_customer(email='outra@example.com')
+        self.client.force_login(self.user)
+
+    def test_so_por_post(self):
+        self.assertEqual(self.client.get(reverse('account_export')).status_code, 405)
+
+    def test_baixa_json_com_os_dados_da_propria_conta(self):
+        response = self.client.post(reverse('account_export'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment', response['Content-Disposition'])
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data['conta']['email'], 'cliente@example.com')
+        self.assertEqual(data['conta']['nome'], 'Clara')
+        self.assertEqual(data['aceites'][0]['politica_de_privacidade'], 'v1')
+        content = response.content.decode('utf-8')
+        # Nem o hash da senha nem dados de outra conta.
+        self.assertNotIn('argon2', content)
+        self.assertNotIn('outra@example.com', content)
+
+
+class DeleteAccountTest(TestCase):
+    """Excluir a conta = anonimizar (decisão 78)."""
+
+    def setUp(self):
+        self.user = make_customer(first_name='Clara', last_name='Lima')
+        Consent.objects.create(user=self.user, privacy_policy_version='v1', terms_version='v1')
+        self.client.force_login(self.user)
+
+    def delete(self, password=GOOD_PASSWORD, confirm=True):
+        """Envia o formulário de exclusão."""
+        data = {'password': password}
+        if confirm:
+            data['confirm'] = 'on'
+        return self.client.post(reverse('account_delete'), data)
+
+    def test_senha_errada_nao_exclui(self):
+        response = self.delete(password='senha-errada-123')
+        self.assertContains(response, 'Senha incorreta')
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.anonymized_at)
+
+    def test_sem_marcar_a_confirmacao_nao_exclui(self):
+        response = self.delete(confirm=False)
+        self.assertContains(response, 'Marque a caixa para confirmar')
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.anonymized_at)
+
+    def test_exclusao_anonimiza_e_encerra_a_sessao(self):
+        response = self.delete()
+        self.assertRedirects(response, reverse('account_deleted'))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, f'anonimizada-{self.user.pk}@anonimizado.invalid')
+        self.assertEqual(self.user.first_name, '')
+        self.assertEqual(self.user.last_name, '')
+        self.assertFalse(self.user.has_usable_password())
+        self.assertFalse(self.user.is_active)
+        self.assertIsNotNone(self.user.anonymized_at)
+        # Saiu da conta neste navegador.
+        self.assertNotIn(SESSION_KEY, self.client.session)
+        # O aceite fica, como prova (sem dado pessoal).
+        self.assertEqual(Consent.objects.filter(user=self.user).count(), 1)
+
+    def test_outras_sessoes_abertas_tambem_caem(self):
+        other_device = Client()
+        other_device.force_login(self.user)
+        self.delete()
+        # No "outro aparelho", a sessão não vale mais: a página pede login.
+        response = other_device.get(reverse('account'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_login_antigo_nao_funciona_mais(self):
+        self.delete()
+        response = Client().post(
+            reverse('login'), {'username': 'cliente@example.com', 'password': GOOD_PASSWORD}
+        )
+        self.assertNotIn(SESSION_KEY, response.client.session)
+
+    def test_apaga_registros_de_login_e_limpa_o_historico_do_admin(self):
+        AccessAttempt.objects.create(
+            username='cliente@example.com', ip_address='127.0.0.1', user_agent='x',
+            http_accept='x', path_info='/conta/entrar/', get_data='', post_data='',
+            failures_since_start=1,
+        )
+        LogEntry.objects.create(
+            user=make_customer(email='dona@example.com', is_staff=True),
+            content_type=ContentType.objects.get_for_model(User),
+            object_id=str(self.user.pk), object_repr='cliente@example.com',
+            action_flag=CHANGE,
+        )
+        self.delete()
+        self.assertFalse(AccessAttempt.objects.filter(username='cliente@example.com').exists())
+        self.assertFalse(LogEntry.objects.filter(object_repr='cliente@example.com').exists())
+
+    def test_conta_do_admin_nao_se_exclui_pelo_site(self):
+        staff = make_customer(email='dona@example.com', is_staff=True)
+        self.client.force_login(staff)
+        response = self.client.post(reverse('account_delete'), {'password': GOOD_PASSWORD, 'confirm': 'on'})
+        self.assertRedirects(response, reverse('account'))
+        staff.refresh_from_db()
+        self.assertIsNone(staff.anonymized_at)
+        self.assertTrue(staff.is_active)
+
+
+class CleanupCommandTest(TestCase):
+    """Comando limpar_dados_antigos: prazos de retenção (decisão 79)."""
+
+    def setUp(self):
+        self.now = timezone.now()
+
+    def make_order(self, days_ago):
+        """Cria um pedido e "volta no tempo" a data de criação."""
+        order = Order.objects.create(
+            customer_name='Clara Lima', phone='11999998888', cep='01001000',
+            street='Rua das Flores', number='10', complement='ap 1',
+            neighborhood='Centro', city='São Paulo', state='SP',
+        )
+        # created_at é auto_now_add: só update() consegue mudar a data.
+        Order.objects.filter(pk=order.pk).update(created_at=self.now - timedelta(days=days_ago))
+        return order
+
+    def run_command(self, *args):
+        """Roda o comando e devolve o que ele escreveu no terminal."""
+        out = io.StringIO()
+        call_command('limpar_dados_antigos', *args, stdout=out)
+        return out.getvalue()
+
+    def test_pedido_antigo_e_anonimizado_e_o_recente_nao(self):
+        old = self.make_order(days_ago=ORDER_RETENTION.days + 1)
+        recent = self.make_order(days_ago=10)
+        self.run_command()
+        old.refresh_from_db()
+        recent.refresh_from_db()
+        self.assertEqual(old.customer_name, 'Anonimizado')
+        self.assertEqual(old.phone, '')
+        self.assertEqual(old.cep, '')
+        # Cidade e UF ficam (não identificam a cliente).
+        self.assertEqual(old.city, 'São Paulo')
+        self.assertEqual(recent.customer_name, 'Clara Lima')
+
+    def test_conta_nunca_verificada_e_antiga_e_apagada(self):
+        old = make_customer(email='velha@example.com', verified=False)
+        recent = make_customer(email='nova@example.com', verified=False)
+        verified = make_customer(email='verificada@example.com', verified=True)
+        User.objects.filter(pk__in=[old.pk, verified.pk]).update(
+            date_joined=self.now - timedelta(days=31)
+        )
+        self.run_command()
+        self.assertFalse(User.objects.filter(pk=old.pk).exists())
+        self.assertTrue(User.objects.filter(pk=recent.pk).exists())
+        self.assertTrue(User.objects.filter(pk=verified.pk).exists())
+
+    def test_tentativas_de_login_antigas_sao_apagadas(self):
+        attempt = AccessAttempt.objects.create(
+            username='x@example.com', ip_address='127.0.0.1', user_agent='x',
+            http_accept='x', path_info='/conta/entrar/', get_data='', post_data='',
+            failures_since_start=1,
+        )
+        AccessAttempt.objects.filter(pk=attempt.pk).update(attempt_time=self.now - timedelta(days=31))
+        AccessLog.objects.create(username='x@example.com', ip_address='127.0.0.1', user_agent='x',
+                                 http_accept='x', path_info='/conta/entrar/')
+        self.run_command()
+        self.assertFalse(AccessAttempt.objects.exists())
+        self.assertFalse(AccessLog.objects.exists())
+
+    def test_dry_run_nao_altera_nada_e_a_saida_nao_tem_dado_pessoal(self):
+        order = self.make_order(days_ago=ORDER_RETENTION.days + 1)
+        output = self.run_command('--dry-run')
+        order.refresh_from_db()
+        self.assertEqual(order.customer_name, 'Clara Lima')
+        self.assertIn('seriam anonimizados: 1', output)
+        self.assertNotIn('Clara', output)
+
+
+class LegalPagesTest(TestCase):
+    """Política, Termos, aviso de cookies e identificação do fornecedor."""
+
+    def test_politica_e_termos_sao_rascunhos_com_versao(self):
+        for name, version in [('privacy', PRIVACY_POLICY_VERSION), ('terms', TERMS_VERSION)]:
+            with self.subTest(pagina=name):
+                response = self.client.get(reverse(name))
+                self.assertContains(response, 'RASCUNHO')
+                self.assertContains(response, f'Versão {version}')
+
+    def test_politica_lista_operadores_com_hospedagem_provisoria(self):
+        response = self.client.get(reverse('privacy'))
+        self.assertContains(response, 'Mercado Pago')
+        self.assertContains(response, 'PROVISÓRIO: empresa ainda não definida')
+        self.assertContains(response, 'elegancia.crist@gmail.com')
+
+    @override_settings(STORE_LEGAL_NAME='', STORE_CNPJ='', STORE_ADDRESS='')
+    def test_sem_cnpj_mostra_a_definir(self):
+        response = self.client.get(reverse('terms'))
+        self.assertContains(response, 'CNPJ: [A DEFINIR PELA DONA]')
+
+    @override_settings(STORE_LEGAL_NAME='Loja Exemplo', STORE_CNPJ='00.000.000/0001-00',
+                       STORE_ADDRESS='Rua Exemplo, 1')
+    def test_com_cnpj_preenchido_aparece_sem_mexer_em_template(self):
+        response = self.client.get(reverse('home'))
+        # No rodapé de todas as páginas.
+        self.assertContains(response, 'CNPJ 00.000.000/0001-00')
+
+    def test_aviso_de_cookies_comeca_escondido(self):
+        # O JavaScript mostra o aviso; sem JS ele fica escondido (hidden).
+        response = self.client.get(reverse('home'))
+        self.assertContains(response, 'id="aviso-cookies" role="region" aria-label="Aviso de cookies" hidden')
+
+    def test_site_nao_cria_cookie_alem_dos_necessarios(self):
+        # Visitar páginas comuns não cria cookie nenhum além de sessão/CSRF.
+        response = self.client.get(reverse('home'))
+        self.assertTrue(set(response.cookies.keys()) <= {'sessionid', 'csrftoken', 'messages'})
+
+    def test_login_nao_grava_historico_de_acessos(self):
+        make_customer()
+        self.client.post(reverse('login'), {'username': 'cliente@example.com', 'password': GOOD_PASSWORD})
+        # AXES_DISABLE_ACCESS_LOG = True (decisão 83).
+        self.assertFalse(AccessLog.objects.exists())

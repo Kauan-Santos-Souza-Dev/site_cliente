@@ -957,6 +957,117 @@ main:focus {
   cursor: pointer;
 }
 
+/* 7.3b) LGPD: caixa de aceite, Minha conta, textos legais (v2 Etapa 4) ------- */
+/* Caixa de marcar ao lado do rótulo (e não em cima, como nos outros campos). */
+.campo--caixa {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: start;
+}
+.conta .campo--caixa input,
+.campo--caixa input {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.15rem;
+  accent-color: var(--cor-principal-escura);
+}
+.campo--caixa label {
+  margin: 0;
+  font-weight: 400;
+}
+.campo--caixa .campo__erro {
+  grid-column: 1 / -1;
+}
+/* Lista "rótulo: valor" dos dados da conta. */
+.dados {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0 0 1rem;
+}
+.dados dt {
+  font-weight: 700;
+}
+.dados dd {
+  margin: 0;
+  overflow-wrap: anywhere;   /* e-mails longos quebram em vez de vazar no celular */
+}
+/* Ação destrutiva (excluir conta): vermelho escuro, contraste ~7:1 no branco. */
+.link-perigo {
+  color: #7a1c2c;
+}
+.botao--perigo {
+  border-color: #7a1c2c;
+  background: #7a1c2c;
+}
+.botao--perigo:hover {
+  border-color: #4f111c;
+  background: #4f111c;
+}
+/* Faixa "RASCUNHO" nos textos legais e marcas de itens provisórios. */
+.faixa-rascunho {
+  padding: 0.75rem 1rem;
+  border-left: 4px solid #8a5a00;
+  border-radius: 6px;
+  background: #fff6e0;
+  color: #5c3c00;
+}
+.marca-provisoria {
+  font-weight: 700;
+  color: #5c3c00;
+}
+/* Tabelas dos textos legais: no celular, rolam de lado dentro da caixa
+   (a página em si nunca rola na horizontal). */
+.tabela-rolagem {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+.tabela-simples {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+.tabela-simples th,
+.tabela-simples td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--cor-borda);
+  text-align: left;
+  vertical-align: top;
+}
+.tabela-simples th {
+  color: var(--cor-principal-escura);
+}
+/* Aviso de cookies: faixa fixa no pé da tela. */
+.aviso-cookies {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  left: 1rem;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--cor-borda);
+  border-radius: 8px;
+  background: var(--cor-fundo);
+  box-shadow: 0 6px 24px rgba(46, 36, 48, 0.15);
+}
+/* O atributo hidden precisa vencer o display:flex acima. */
+.aviso-cookies[hidden] {
+  display: none;
+}
+.aviso-cookies p {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
 /* 7.4) Contato ------------------------------------------------------------- */
 .grade--contato {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

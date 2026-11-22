@@ -161,8 +161,42 @@ function ativarGaleriaProduto() {
   });
 }
 
+/**
+ * Aviso de cookies (decisão 82): mostra a faixa até a pessoa clicar em "Entendi".
+ *
+ * A escolha fica no localStorage, um armazenamento do próprio navegador.
+ * Diferente de um cookie, ele NÃO é enviado ao servidor a cada página.
+ * try/catch: em janela anônima ou com armazenamento bloqueado, o acesso
+ * pode dar erro; nesse caso o aviso só aparece de novo, sem quebrar nada.
+ */
+function ativarAvisoCookies() {
+  const aviso = document.getElementById('aviso-cookies');
+  const botao = document.getElementById('aviso-cookies-ok');
+  if (!aviso || !botao) return;
+  const CHAVE = 'aviso-cookies-visto';
+
+  let jaViu = false;
+  try {
+    jaViu = window.localStorage.getItem(CHAVE) === '1';
+  } catch (erro) {
+    jaViu = false;
+  }
+  if (jaViu) return;
+
+  aviso.hidden = false;
+  botao.addEventListener('click', function () {
+    aviso.hidden = true;
+    try {
+      window.localStorage.setItem(CHAVE, '1');
+    } catch (erro) {
+      // Sem armazenamento: o aviso volta na próxima página. Tudo bem.
+    }
+  });
+}
+
 ativarMenuMobile();
 ativarCabecalhoInteligente();
 ativarRevelacaoNoScroll();
 ativarParallax();
 ativarGaleriaProduto();
+ativarAvisoCookies();

@@ -1,22 +1,48 @@
-"""Views de conta: cadastro, verificação de e-mail e reenvio do link.
+"""Views de conta: cadastro, verificação de e-mail e "Minha conta".
 
-Login, logout e "esqueci a senha" usam as views prontas do Django
-(ver contas/urls.py).
+Login, logout, "esqueci a senha" e "trocar senha" usam as views prontas do
+Django (ver contas/urls.py).
+
+Segurança de "Minha conta" (contra IDOR):
+nenhuma rota recebe o id de uma conta na URL. Toda view usa SEMPRE
+`request.user`, a conta da sessão. Não existe endereço que mostre ou altere
+os dados de outra pessoa.
 """
 
+import json
+
 from django.contrib import messages
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import make_password
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .emails import send_account_exists_email, send_verification_email
-from .forms import SignupForm
-from .tokens import get_user_from_verification_token
+from .emails import (
+    send_account_exists_email,
+    send_email_change_link,
+    send_email_changed_notice,
+    send_email_in_use_notice,
+    send_verification_email,
+)
+from .forms import DeleteAccountForm, EmailChangeForm, ProfileForm, SignupForm
+from .legal import PRIVACY_POLICY_VERSION, TERMS_VERSION
+from .models import Consent
+from .privacy import anonymize_user, export_user_data
+from .tokens import get_user_from_verification_token, read_email_change_token
 
 User = get_user_model()
+
+
+def record_consent(user):
+    """Grava o aceite das versões ATUAIS da Política e dos Termos (decisão 77)."""
+    Consent.objects.create(
+        user=user,
+        privacy_policy_version=PRIVACY_POLICY_VERSION,
+        terms_version=TERMS_VERSION,
+    )
 
 
 def signup(request):
@@ -63,6 +89,8 @@ def register_signup(request, form):
             # este trecho é desfeito.
             with transaction.atomic():
                 user = form.save()
+                # Dentro do mesmo atomic(): conta e aceite são gravados juntos.
+                record_consent(user)
         except IntegrityError:
             existing = User.objects.get(email=email)
         else:
@@ -81,6 +109,8 @@ def register_signup(request, form):
         existing.last_name = form.cleaned_data['last_name']
         existing.set_password(password)  # guarda o hash, nunca a senha
         existing.save()
+        # Quem refez o cadastro também marcou a caixa: registra o novo aceite.
+        record_consent(existing)
         send_verification_email(request, existing)
 
 
@@ -130,3 +160,130 @@ def resend_verification(request):
         'Pedidos seguidos precisam de alguns minutos de intervalo.',
     )
     return redirect('verification_pending')
+
+
+# ---------------------------------------------------------------------------
+# "Minha conta" (v2 Etapa 4, LGPD art. 18)
+# ---------------------------------------------------------------------------
+
+@login_required
+def account(request):
+    """Painel "Minha conta": mostra os dados guardados e leva às ações."""
+    context = {'consents': request.user.consents.all()}
+    return render(request, 'contas/account.html', context)
+
+
+@login_required
+def account_edit(request):
+    """Corrigir nome e sobrenome (art. 18 III)."""
+    if request.method == 'POST':
+        form = ProfileForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Seus dados foram atualizados.')
+            return redirect('account')
+    else:
+        form = ProfileForm(instance=request.user)
+    return render(request, 'contas/account_edit.html', {'form': form})
+
+
+@login_required
+def email_change(request):
+    """Pede a troca de e-mail: envia um link ao NOVO endereço (decisão 81).
+
+    A mensagem depois do envio é sempre a mesma, exista ou não outra conta
+    com o novo e-mail (contra enumeração).
+    """
+    if request.method == 'POST':
+        form = EmailChangeForm(request.user, request.POST)
+        if form.is_valid():
+            new_email = form.cleaned_data['new_email']
+            existing = User.objects.filter(email=new_email).first()
+            if existing is None:
+                send_email_change_link(request, request.user, new_email)
+            else:
+                send_email_in_use_notice(request, request.user, existing)
+            messages.info(
+                request,
+                'Se for possível usar este endereço, enviamos um link para ele. '
+                'O e-mail da conta só muda depois que você abrir o link.',
+            )
+            return redirect('account')
+    else:
+        form = EmailChangeForm(request.user)
+    return render(request, 'contas/email_change.html', {'form': form})
+
+
+def email_change_confirm(request, token):
+    """Abre o link do e-mail e troca o endereço da conta.
+
+    Não exige login: o link pode ser aberto em outro aparelho. Quem prova a
+    posse do novo e-mail é o próprio link, assinado e com validade.
+    """
+    user, new_email = read_email_change_token(token)
+    if user is None:
+        return render(request, 'contas/email_change_invalid.html', status=400)
+
+    old_email = user.email
+    user.email = new_email
+    # Abrir o link prova que a cliente recebe e-mails no novo endereço.
+    user.email_verified = True
+    try:
+        # atomic() isola a tentativa: se outra conta passou a usar este
+        # e-mail depois que o link foi enviado, o banco recusa (unique).
+        with transaction.atomic():
+            user.save(update_fields=['email', 'email_verified'])
+    except IntegrityError:
+        return render(request, 'contas/email_change_invalid.html', status=400)
+
+    send_email_changed_notice(old_email, user)
+    return render(request, 'contas/email_change_done.html')
+
+
+@login_required
+@require_POST
+def account_export(request):
+    """Baixa um arquivo JSON com os dados da conta (art. 18 II e V).
+
+    Só por POST (botão com CSRF): um link ou imagem em outro site não
+    consegue disparar o download com a sessão da cliente.
+    """
+    data = export_user_data(request.user)
+    # ensure_ascii=False mantém os acentos legíveis; indent deixa o arquivo
+    # fácil de ler num editor de texto.
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    response = HttpResponse(content, content_type='application/json; charset=utf-8')
+    # "attachment" faz o navegador baixar o arquivo em vez de abri-lo.
+    response['Content-Disposition'] = 'attachment; filename="meus-dados-elegancia-crista.json"'
+    return response
+
+
+@login_required
+def account_delete(request):
+    """Exclui a conta: confirma com a senha e anonimiza (art. 18 VI, decisão 78).
+
+    Contas do admin não se excluem por aqui: a dona trancaria o próprio
+    painel. Isso é feito no servidor, por quem administra.
+    """
+    if request.user.is_staff:
+        messages.error(
+            request,
+            'Contas de administração não podem ser excluídas por esta página.',
+        )
+        return redirect('account')
+
+    if request.method == 'POST':
+        form = DeleteAccountForm(request.user, request.POST)
+        if form.is_valid():
+            anonymize_user(request.user)
+            # logout() apaga a sessão atual (inclusive o carrinho).
+            logout(request)
+            return redirect('account_deleted')
+    else:
+        form = DeleteAccountForm(request.user)
+    return render(request, 'contas/account_delete.html', {'form': form})
+
+
+def account_deleted(request):
+    """Página final: a conta foi excluída."""
+    return render(request, 'contas/account_deleted.html')

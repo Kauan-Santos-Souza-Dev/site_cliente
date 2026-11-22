@@ -1,0 +1,14 @@
+{% autoescape off %}{# E-mail em texto puro: sem "escape" de HTML, senão o link viraria &amp;. #}Olá, {{ user.first_name }}!
+
+Recebemos um pedido para usar este endereço como o novo e-mail da sua conta na Elegância Cristã.
+
+Para confirmar, abra o link abaixo:
+
+{{ link }}
+
+O link vale por 24 horas. Enquanto você não abrir o link, nada muda na sua conta.
+
+Se você não pediu esta troca, ignore esta mensagem.
+
+Elegância Cristã
+{% endautoescape %}

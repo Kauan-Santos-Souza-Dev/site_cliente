@@ -6,6 +6,8 @@ Lema da loja: "Operando Deus quem impedirá".
 É um projeto real, feito por um estudante de back end (Kauan) que está aprendendo Python, Django e DRF.
 **O código precisa ensinar:** ele vai estudar o projeto etapa por etapa.
 
+**Contexto:** o site é projeto de portfólio do Kauan, feito para uma loja micro que **ainda não tem CNPJ**; a dona pretende abrir CNPJ no futuro. Seguir sem CNPJ por enquanto é decisão consciente do Kauan e da dona (decisão 85). O site já fica pronto para receber a identificação do fornecedor pelo `.env`, e as pendências de produção estão na decisão 69.
+
 **Versões:** a v1 (catálogo, carrinho, pedido pelo WhatsApp) está concluída e marcada com a tag `v1.0`.
 A **v2** (pagamento online, contas de clientes e parcelamento) é desenvolvida na branch `v2`.
 
@@ -99,7 +101,8 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 - **CPF:** **não armazenar**. Se o Pix exigir, pedir no pagamento e enviar direto ao gateway. Confirmar no sandbox (v2 Etapa 7) e avisar o Kauan.
 - **Troca e estorno:** mínimo legal do CDC (art. 49): desistência em até 7 dias corridos após o recebimento, devolução integral (inclusive frete), frete de devolução por conta da loja. **Estorno total pelo admin.** Prazos além do legal e troca de tamanho são política a definir pela dona: textos como **rascunho marcado para revisão jurídica**.
 - **Admin:** só a dona acessa; **2FA obrigatório** para contas do admin.
-- **E-mail da loja:** ainda não confirmado (vale para o contato e para o remetente).
+- **E-mail da loja:** `elegancia.crist@gmail.com`, **confirmado pela dona** (v2 Etapa 4), para contato e privacidade. O remetente dos e-mails automáticos será definido com o Brevo.
+- **LGPD (v2 Etapa 4):** Política e Termos são **rascunhos para revisão jurídica**; prazos de retenção na decisão 79; a limpeza (`limpar_dados_antigos`) é manual até a hospedagem permitir agendar. Decisões pendentes da dona: seção "Pendências da dona da loja" do README.
 
 ### Dependências da v2
 - **Aprovadas e instaladas:** `argon2-cffi` (Etapa 2); `django-axes`, `django-otp` e `qrcode` (Etapa 3).
@@ -132,9 +135,9 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 
 ## Dados de contato da loja
 - WhatsApp: (11) 98533-5054 (formato para o link: 5511985335054)
-- E-mail: elegancia.crist@gmail.com (**confirmar com a loja antes de publicar**)
+- E-mail: elegancia.crist@gmail.com (confirmado pela dona)
 - Instagram: @elegancia.crista.oficial
-- A loja ainda **não tem CNPJ**. Não colocar CNPJ, nota fiscal ou razão social no site. Isso também restringe a escolha do gateway (conta de pessoa física).
+- A loja ainda **não tem CNPJ** (decisão consciente, decisão 85). Não inventar CNPJ, nota fiscal ou razão social. A identificação do fornecedor (Decreto 7.962/2013) fica em `STORE_LEGAL_NAME`, `STORE_CNPJ` e `STORE_ADDRESS` no `.env`, **vazias** até o CNPJ existir. **Nunca** exibir CPF nem endereço residencial da dona, nem pôr dado pessoal real dela no repositório. A falta de CNPJ também restringe a escolha do gateway (conta de pessoa física).
 - Número e e-mail ficam em variáveis de ambiente/configuração, não espalhados pelos templates.
 
 ## Testes

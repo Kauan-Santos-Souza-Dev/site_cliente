@@ -1,0 +1,10 @@
+{% autoescape off %}Olá, {{ user.first_name }}!
+
+O e-mail da sua conta na Elegância Cristã foi alterado. A partir de agora, use o novo endereço para entrar.
+
+Se foi você, não precisa fazer nada.
+
+Se NÃO foi você, fale com a gente o quanto antes respondendo pelos nossos canais de contato no site.
+
+Elegância Cristã
+{% endautoescape %}

@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .forms import AdminUserChangeForm, AdminUserCreateForm
-from .models import User
+from .models import Consent, User
 
 
 @admin.register(User)
@@ -19,7 +19,7 @@ class UserAdmin(DjangoUserAdmin):
     add_form = AdminUserCreateForm
 
     list_display = ('email', 'first_name', 'last_name', 'is_active', 'is_staff', 'date_joined')
-    list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups')
+    list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups', 'anonymized_at')
     search_fields = ('email', 'first_name', 'last_name')
     ordering = ('email',)
 
@@ -30,8 +30,10 @@ class UserAdmin(DjangoUserAdmin):
             'Permissões',
             {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')},
         ),
-        ('Datas', {'fields': ('last_login', 'date_joined')}),
+        ('Datas', {'fields': ('last_login', 'date_joined', 'anonymized_at')}),
     )
+    # Data da exclusão pela cliente: só para consulta (decisão 78).
+    readonly_fields = ('anonymized_at',)
     # Tela "Adicionar usuário".
     add_fieldsets = (
         (
@@ -42,3 +44,29 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+
+@admin.register(Consent)
+class ConsentAdmin(admin.ModelAdmin):
+    """Aceites da Política e dos Termos, SOMENTE LEITURA (decisão 77).
+
+    O aceite é uma prova: ninguém pode criar, editar ou apagar pelo admin.
+    Ele só nasce no cadastro do site.
+    """
+
+    list_display = ('user', 'privacy_policy_version', 'terms_version', 'accepted_at')
+    list_filter = ('privacy_policy_version', 'terms_version')
+    search_fields = ('user__email',)
+    date_hierarchy = 'accepted_at'
+
+    def has_add_permission(self, request):
+        """Ninguém cria aceite pelo admin."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Ninguém edita aceite (a tela abre só para leitura)."""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Ninguém apaga aceite pelo admin."""
+        return False

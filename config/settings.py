@@ -241,6 +241,15 @@ AXES_USERNAME_CALLABLE = 'contas.axes.get_axes_username'
 # existe: o bloqueio acontece igual para e-mail cadastrado ou não).
 # O axes responde com status 429 ("muitas requisições").
 AXES_LOCKOUT_TEMPLATE = 'contas/bloqueado.html'
+# Privacidade (decisão 83):
+# - NÃO guardar o histórico de logins BEM-SUCEDIDOS (tabela AccessLog, com
+#   e-mail, IP e navegador). O bloqueio não depende dele, e dado que não é
+#   necessário não deve ser guardado (LGPD art. 6º III, minimização).
+AXES_DISABLE_ACCESS_LOG = True
+# - Nas mensagens de aviso que o axes escreve no terminal/log, o e-mail e o
+#   IP aparecem como "********". Este já é o padrão do axes; fica escrito
+#   aqui para ninguém remover sem perceber. (A senha o axes nunca registra.)
+AXES_SENSITIVE_PARAMETERS = ['username', 'ip_address']
 # IP real atrás de proxy (Nginx, Cloudflare): veja o checklist do README.
 
 
@@ -332,7 +341,17 @@ REST_FRAMEWORK = {
 
 # Número só com dígitos, com DDI e DDD: usado no link https://wa.me/<número>
 WHATSAPP_NUMBER = os.environ.get('WHATSAPP_NUMBER', '5511985335054')
-# Confirmar com a loja antes de publicar.
+# E-mail de contato confirmado pela dona da loja (v2 Etapa 4).
 CONTACT_EMAIL = os.environ.get('CONTACT_EMAIL', 'elegancia.crist@gmail.com')
 INSTAGRAM_HANDLE = 'elegancia.crista.oficial'
 STORE_MOTTO = 'Operando Deus quem impedirá'
+
+# Identificação do fornecedor exigida no comércio eletrônico (Decreto
+# 7.962/2013, art. 2º I e II; decisão 85). A loja ainda não tem CNPJ: por
+# isso ficam VAZIOS e a Política, os Termos e o rodapé mostram
+# "[A DEFINIR PELA DONA]". Quando o CNPJ existir, basta preencher no .env,
+# sem mexer em código. Só existe campo de CNPJ (não de CPF) e o endereço é
+# o COMERCIAL: nunca coloque aqui CPF nem endereço residencial.
+STORE_LEGAL_NAME = os.environ.get('STORE_LEGAL_NAME', '').strip()
+STORE_CNPJ = os.environ.get('STORE_CNPJ', '').strip()
+STORE_ADDRESS = os.environ.get('STORE_ADDRESS', '').strip()

@@ -17,7 +17,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
-from .tokens import make_verification_token
+from .tokens import make_email_change_token, make_verification_token
 
 # Intervalo mínimo entre dois e-mails de segurança para a mesma conta.
 EMAIL_COOLDOWN = timedelta(minutes=2)
@@ -77,3 +77,42 @@ def send_account_exists_email(request, user):
     send_template_email(user.email, 'conta_existente', context)
     mark_email_sent(user)
     return True
+
+
+def send_email_change_link(request, user, new_email):
+    """Envia ao NOVO e-mail o link que confirma a troca (decisão 81).
+
+    O limite de frequência é contado na conta que pediu a troca. O e-mail
+    só muda quando o link for aberto: assim ninguém coloca na conta um
+    endereço que não é dela.
+    """
+    if not can_send_email(user):
+        return False
+    token = make_email_change_token(user, new_email)
+    link = request.build_absolute_uri(reverse('email_change_confirm', args=[token]))
+    send_template_email(new_email, 'troca_email', {'user': user, 'link': link})
+    mark_email_sent(user)
+    return True
+
+
+def send_email_in_use_notice(request, requester, existing_user):
+    """O novo e-mail já tem conta: avisa a dona DELE, sem trocar nada.
+
+    A tela de quem pediu a troca mostra a mesma mensagem de sempre, então
+    ninguém descobre quem é cliente da loja tentando trocar de e-mail.
+    O intervalo mínimo vale para as DUAS contas: nem a que pede nem a que
+    recebe o aviso podem ser usadas para encher uma caixa de entrada.
+    """
+    if not (can_send_email(requester) and can_send_email(existing_user)):
+        return False
+    mark_email_sent(requester)
+    return send_account_exists_email(request, existing_user)
+
+
+def send_email_changed_notice(old_email, user):
+    """Avisa o endereço ANTIGO que o e-mail da conta foi trocado.
+
+    Se não foi a dona da conta, ela fica sabendo e pode falar com a loja.
+    Não passa pelo limite de frequência: é um aviso de segurança único.
+    """
+    send_template_email(old_email, 'email_alterado', {'user': user})

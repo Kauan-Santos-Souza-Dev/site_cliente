@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% comment %}
+  Termos de Uso, em linguagem simples (view loja.views.terms).
+  RASCUNHO: precisa de revisão por quem entende de direito antes da publicação
+  (decisão 84). Trechos que dependem da dona da loja estão marcados com
+  [A DEFINIR PELA DONA]. Ao mudar o texto, troque TERMS_VERSION em
+  contas/legal.py.
+{% endcomment %}
+
+{% block title %}Termos de Uso — Elegância Cristã{% endblock %}
+{% block meta_description %}Regras de uso do site e de compra na Elegância Cristã.{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <p class="faixa-rascunho" role="note"><strong>RASCUNHO</strong> — texto pendente de revisão jurídica.</p>
+    <h1 class="secao__titulo">Termos de Uso</h1>
+    <p class="texto-pagina__data">Versão {{ terms_version }}.</p>
+
+    <h2>1. Quem vende</h2>
+    <p>A Elegância Cristã é uma loja de pequeno porte de moda feminina, que ainda não tem CNPJ.</p>
+    <ul class="lista-simples">
+      <li>Responsável: {{ STORE_LEGAL_NAME|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>CNPJ: {{ STORE_CNPJ|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>Endereço comercial: {{ STORE_ADDRESS|default:"[A DEFINIR PELA DONA]" }}</li>
+      <li>Contato: <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a> e <a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">WhatsApp</a></li>
+    </ul>
+
+    <h2>2. Sua conta</h2>
+    <ul class="lista-simples">
+      <li>Você pode navegar e montar o carrinho sem conta. Para finalizar a compra, é preciso ter conta com o e-mail confirmado.</li>
+      <li>A conta é pessoal. Informe dados verdadeiros e não compartilhe a sua senha.</li>
+      <li>Você pode corrigir seus dados, baixar uma cópia deles e excluir a conta quando quiser, na página Minha conta.</li>
+    </ul>
+
+    <h2>3. Produtos e preços</h2>
+    <ul class="lista-simples">
+      <li>As fotos mostram as peças da forma mais fiel possível; pode haver pequena diferença de cor conforme a tela.</li>
+      <li>A disponibilidade de cada tamanho é conferida ao adicionar ao carrinho e de novo ao finalizar o pedido.</li>
+      <li>O preço registrado no pedido é o do momento da compra, mesmo que mude depois.</li>
+    </ul>
+
+    <h2>4. Pedido, pagamento e entrega</h2>
+    <ul class="lista-simples">
+      <li>Hoje, o pedido é registrado no site e o frete e o pagamento são combinados pelo WhatsApp.</li>
+      <li>Quando o pagamento online (Pix e cartão, pelo Mercado Pago) for ativado, o pedido só será considerado pago depois da confirmação do Mercado Pago.</li>
+      <li>Prazo e forma de entrega: [A DEFINIR PELA DONA].</li>
+    </ul>
+
+    <h2>5. Direito de arrependimento</h2>
+    <p>Pelo Código de Defesa do Consumidor (art. 49), você pode desistir da compra em até <strong>7 dias corridos</strong> depois de receber o pedido, sem precisar explicar o motivo. Devolvemos o valor integral, inclusive o frete, e o envio da devolução fica por conta da loja. Para desistir, fale com a gente pelos contatos acima.</p>
+
+    <h2>6. Trocas e defeitos</h2>
+    <ul class="lista-simples">
+      <li>Troca de tamanho e outros prazos além dos 7 dias: [A DEFINIR PELA DONA].</li>
+      <li>Peças com defeito seguem os prazos e direitos do Código de Defesa do Consumidor (art. 26).</li>
+    </ul>
+
+    <h2>7. Privacidade</h2>
+    <p>O uso dos seus dados está explicado na <a href="{% url 'privacy' %}">Política de Privacidade</a>.</p>
+
+    <h2>8. Mudanças nestes termos</h2>
+    <p>Quando estes termos mudarem, a versão no topo da página muda também. Guardamos qual versão você aceitou no cadastro. Pedidos já feitos seguem os termos da data da compra.</p>
+  </div>
+</section>
+{% endblock %}

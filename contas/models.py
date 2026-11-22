@@ -96,6 +96,10 @@ class User(AbstractUser):
     # evitar que alguém "bombardeie" a caixa de entrada de outra pessoa.
     # Fica no banco (não no cache) para valer em todos os processos.
     last_email_sent_at = models.DateTimeField('último e-mail enviado em', null=True, blank=True)
+    # Quando a conta foi excluída pela cliente (decisão 78). "Excluir" aqui
+    # é ANONIMIZAR: os dados pessoais somem, mas a linha fica, para que os
+    # pedidos (Etapa 5) continuem apontando para ela pelo prazo legal.
+    anonymized_at = models.DateTimeField('anonimizada em', null=True, blank=True)
 
     # Campo usado como "nome de login" pelo Django (login, admin, createsuperuser).
     USERNAME_FIELD = 'email'
@@ -117,3 +121,36 @@ class User(AbstractUser):
         """Guarda o e-mail sempre em minúsculas, venha de onde vier (site, admin, shell)."""
         self.email = User.objects.normalize_email(self.email)
         super().save(*args, **kwargs)
+
+
+class Consent(models.Model):
+    """Registro do aceite da Política de Privacidade e dos Termos de Uso (decisão 77).
+
+    Uma linha por aceite: QUEM aceitou, QUAIS versões dos textos e QUANDO.
+    A LGPD (art. 8º, § 2º) diz que cabe à loja provar o aceite; esta tabela
+    é essa prova. Não guardamos IP nem navegador: não são necessários para
+    provar o aceite (minimização, art. 6º III).
+
+    A base legal para guardar os dados da conta é a execução do contrato
+    (art. 7º V). A caixa do cadastro registra que a cliente LEU e ACEITOU
+    versões específicas dos textos.
+    """
+
+    # CASCADE: se a conta for apagada de verdade (só contas nunca verificadas,
+    # decisão 79), o aceite vai junto. Na exclusão pedida pela cliente a conta
+    # é anonimizada, não apagada, e o aceite continua como prova.
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='consents', verbose_name='usuário'
+    )
+    privacy_policy_version = models.CharField('versão da Política de Privacidade', max_length=20)
+    terms_version = models.CharField('versão dos Termos de Uso', max_length=20)
+    accepted_at = models.DateTimeField('aceito em', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'aceite de termos'
+        verbose_name_plural = 'aceites de termos'
+        ordering = ['-accepted_at']
+
+    def __str__(self):
+        """Ex.: "Política 2026-11-22 / Termos 2026-11-22"."""
+        return f'Política {self.privacy_policy_version} / Termos {self.terms_version}'

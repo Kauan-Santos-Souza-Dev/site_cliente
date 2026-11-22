@@ -62,7 +62,8 @@
           {% endcomment %}
           {% if user.is_authenticated %}
             <li class="menu__conta">
-              <span class="menu__saudacao">Olá, {{ user.first_name|default:user.email }}</span>
+              {# A saudação leva à página "Minha conta" (v2 Etapa 4). #}
+              <a class="menu__link menu__saudacao" href="{% url 'account' %}"{% if atual == 'account' %} aria-current="page"{% endif %}>Olá, {{ user.first_name|default:user.email }} <span class="visualmente-oculto">— Minha conta</span></a>
               <form class="menu__sair" method="post" action="{% url 'logout' %}">
                 {% csrf_token %}
                 <button class="menu__link menu__botao" type="submit">Sair</button>
@@ -114,10 +115,32 @@
           <li><a href="{% url 'catalog' %}">Catálogo</a></li>
           <li><a href="{% url 'about' %}">Sobre a loja</a></li>
           <li><a href="{% url 'privacy' %}">Política de Privacidade</a></li>
+          <li><a href="{% url 'terms' %}">Termos de Uso</a></li>
         </ul>
       </div>
     </div>
+    {% comment %}
+      Identificação do fornecedor (Decreto 7.962/2013, art. 2º; decisão 85).
+      Só aparece quando a loja tiver CNPJ e os dados forem preenchidos no .env.
+      Até lá, a Política e os Termos mostram "[A DEFINIR PELA DONA]".
+    {% endcomment %}
+    {% if STORE_CNPJ %}
+      <p class="rodape__copyright">{{ STORE_LEGAL_NAME }} · CNPJ {{ STORE_CNPJ }}{% if STORE_ADDRESS %} · {{ STORE_ADDRESS }}{% endif %}</p>
+    {% endif %}
     <p class="rodape__copyright">© {% now "Y" %} Elegância Cristã</p>
   </footer>
+
+  {% comment %}
+    Aviso de cookies (decisão 82). É só INFORMATIVO: o site usa apenas
+    cookies estritamente necessários (sessão e CSRF), que não dependem de
+    consentimento (ANPD, Guia de Cookies, 2022). Por isso não há botão
+    "recusar". Começa escondido (hidden): o main.js mostra o aviso só se a
+    pessoa ainda não clicou em "Entendi". Sem JavaScript, ele não aparece;
+    a explicação completa está na Política de Privacidade.
+  {% endcomment %}
+  <div class="aviso-cookies" id="aviso-cookies" role="region" aria-label="Aviso de cookies" hidden>
+    <p>Usamos só cookies essenciais: um para o carrinho e o login e outro de segurança. Nada de propaganda ou rastreamento. <a href="{% url 'privacy' %}#cookies">Saiba mais</a>.</p>
+    <button class="botao" type="button" id="aviso-cookies-ok">Entendi</button>
+  </div>
 </body>
 </html>

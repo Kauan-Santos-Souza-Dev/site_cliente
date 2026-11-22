@@ -17,6 +17,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 1 | Preparação da v2: versionamento, gateway e decisões de negócio | 51 a 63 |
 | v2 · 2 | Usuário customizado e autenticação básica | 64 a 69 |
 | v2 · 3 | Segurança da conta | 70 a 76 (e atualiza 65, 66 e 69) |
+| v2 · 4 | LGPD: aceite, Minha conta, retenção, textos legais, cookies | 77 a 85 (e reescreve 69) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -364,10 +365,15 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** `MinimumLengthValidator` com `min_length: 10` (o padrão do Django é 8), mais os validadores padrão: parecida com nome/e-mail, lista de senhas comuns, só números. Vale para o site, o admin e o `createsuperuser`.
 - **Por quê:** o tamanho é o fator que mais aumenta o número de tentativas necessárias para adivinhar uma senha. Exigir símbolos e maiúsculas, em vez disso, costuma gerar senhas previsíveis ("Senha@123").
 
-## 69. O site NÃO deve ser publicado antes da v2 Etapa 3 — v2 Etapa 2 (atualizada na v2 Etapa 3)
-- **Situação ao fim da Etapa 2:** (1) o login do site e do admin **não bloqueia tentativas repetidas** (força bruta), e (2) o cadastro **revela se um e-mail está cadastrado** (decisão 66).
-- **Consequência:** a branch `v2` serve só para desenvolvimento até a v2 Etapa 3 resolver os dois pontos (bloqueio de tentativas e cadastro com resposta genérica + verificação de e-mail). O checklist do README repete o aviso.
-- **Etapa 3:** os dois pontos foram resolvidos (decisões 71 e 73). A v2 continua **sem ir ao ar** até a v2 Etapa 9: faltam LGPD, pagamento e a revisão final, e o e-mail ainda sai só no console.
+## 69. Pendências de produção (sem bloquear o desenvolvimento) — v2 Etapa 2 (reescrita na v2 Etapa 4)
+- **Histórico:** na Etapa 2, esta decisão dizia "não publicar antes da v2 Etapa 3", porque o login não bloqueava tentativas e o cadastro revelava e-mails. A Etapa 3 resolveu os dois pontos (decisões 71 e 73).
+- **Agora:** o desenvolvimento segue normalmente. A loja só vai ao ar quando **todas** estas pendências estiverem resolvidas:
+  1. v2 Etapas 5 e 9 concluídas (pedido ligado à conta; revisão final de segurança).
+  2. **Agendamento** do comando `limpar_dados_antigos` (decisão 79). Hoje ele é manual.
+  3. **Hospedagem definida** (atualizar os operadores e o prazo de backup na Política, decisão 84).
+  4. **Revisão jurídica** da Política de Privacidade e dos Termos de Uso.
+  5. **Identificação do fornecedor** (nome, CNPJ, endereço comercial) preenchida pela dona no `.env` (decisão 85).
+- O checklist do README ("Checklist antes de publicar") repete esta lista.
 
 ## 70. MySQL com usuário dedicado, sem root — v2 Etapa 3
 - **Situação encontrada:** o `.env` conectava como `root` (contrariando a decisão 8) e o usuário `elegancia` não existia.
@@ -422,3 +428,77 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** `python manage.py criar_grupos` cria (ou atualiza) o grupo **"Loja"** com 17 permissões: produtos, variações e imagens (todas as ações), categorias (só ver), pedidos (ver, editar, apagar; o admin já limita o que pode ser apagado, decisão 46) e itens de pedido (só ver).
 - **Fora do grupo, de propósito:** contas de clientes, grupos e permissões, dispositivos 2FA e registros do axes. Sugestão de uso: a dona trabalha no dia a dia com uma conta `is_staff` do grupo "Loja" (com 2FA), e a superusuária fica para administrar contas e segurança.
 - **Por que comando e não migration:** as permissões do Django só são criadas depois das migrations (sinal `post_migrate`); numa migration de dados elas podem não existir ainda. O comando pode rodar quantas vezes quiser (`get_or_create` + `permissions.set`).
+
+## 77. Aceite versionado no cadastro (model `Consent`) — v2 Etapa 4
+- **Escolha:** caixa "Li e aceito os Termos de Uso e a Política de Privacidade", **desmarcada por padrão** e obrigatória no cadastro (`SignupForm.accept_terms`). Cada aceite vira uma linha em `contas_consent`: usuária, versão da Política, versão dos Termos e data/hora (`accepted_at`). As versões ficam em `contas/legal.py` (`PRIVACY_POLICY_VERSION`, `TERMS_VERSION`) e aparecem no topo das páginas.
+- **Por quê:** a LGPD põe na loja o ônus de provar o aceite (art. 8º, § 2º); guardar a **versão** permite provar o que foi aceito mesmo depois de o texto mudar. Caixa pré-marcada não vale como manifestação livre (art. 5º, XII).
+- **Nuance da base legal:** os dados da conta são tratados para **executar o contrato** (art. 7º, V), não "por consentimento". A caixa registra ciência e aceite de textos versionados. Se um dia houver tratamento baseado em consentimento (ex.: newsletter), ele terá caixa própria e separada.
+- **Onde:** `contas/models.py` (`Consent`), `contas/views.py` (`record_consent`, chamada no cadastro novo e no cadastro refeito de conta não verificada; a conta verificada não muda, para a resposta continuar idêntica, decisão 73). Admin **somente leitura** (`ConsentAdmin`); por isso o admin também não apaga uma conta que tenha aceite (o caminho é anonimizar, decisão 78).
+- **Descartado:** guardar IP/navegador no aceite (não é necessário para a prova; minimização); duas caixas separadas (mais atrito, mesmo efeito).
+
+## 78. Excluir conta = anonimizar — v2 Etapa 4
+- **Escolha:** "Excluir minha conta" (com senha atual + caixa de confirmação) chama `anonymize_user` (`contas/privacy.py`): e-mail vira `anonimizada-<id>@anonimizado.invalid`, nome e sobrenome vazios, senha inutilizável, conta inativa, `anonymized_at` preenchido. Também apaga os registros do axes daquele e-mail, os dispositivos 2FA e troca o e-mail no histórico do admin (`django_admin_log`) por "Conta anonimizada". Tudo dentro de `transaction.atomic()`.
+- **Por quê:** a linha da conta continua existindo para que os pedidos (ligados à conta na Etapa 5) sigam guardados pelo prazo da decisão 79, sem identificar a cliente (dado anonimizado não é dado pessoal, art. 12). A senha inutilizável muda o hash, e o Django derruba **todas** as sessões abertas da conta.
+- **Segurança:** pede a senha (protege contra quem acha o computador com a conta aberta); POST com CSRF; contas `is_staff` não se excluem pelo site (a dona trancaria o admin).
+- **Pendência para a Etapa 5:** bloquear ou condicionar a exclusão enquanto houver pedido **ativo** (aguardando pagamento, pago e não entregue, estorno em andamento).
+- **Descartado:** apagar a linha (`delete()`): os pedidos perderiam o vínculo ou seriam apagados junto, contra a guarda legal.
+
+## 79. Prazos de retenção e comando de limpeza (manual por enquanto) — v2 Etapa 4
+- **Escolha:** prazos em `contas/legal.py`, aplicados por `python manage.py limpar_dados_antigos` (com `--dry-run`). A saída mostra só quantidades, nunca dados pessoais.
+
+| Dado | Prazo | Fundamento |
+|---|---|---|
+| Conta | enquanto existir; exclusão = anonimização imediata | LGPD arts. 15, 16 e 18, VI |
+| Nome, telefone e endereço do pedido | 5 anos do pedido, depois anonimizados (ficam cidade, UF, itens e valores) | LGPD art. 16, I, e art. 7º, VI; CDC art. 27 (5 anos para pedir reparação por fato do produto). **Atenção:** o art. 27 conta do *conhecimento do dano*, então "5 anos do pedido" é uma referência, não um prazo exato. Revisão jurídica. Com CNPJ, prazos fiscais (CTN arts. 173 e 195) podem se somar. |
+| Conta nunca verificada | 30 dias, depois apagada | Sem prazo legal; minimização (art. 6º, III). Não pode ter pedido (decisão 72). |
+| Tentativas de login (axes) | 30 dias | Sem prazo legal; interesse legítimo de segurança (art. 7º, IX). |
+| Histórico de logins bem-sucedidos | não guardado | Decisão 83. |
+| Sessões | 14 dias (`SESSION_COOKIE_AGE`) + `clearsessions` | Configuração técnica. |
+
+- **Honestidade:** hoje o comando é **manual**; a Política diz isso. O agendamento (ex.: diário) depende da hospedagem e é **pré-requisito de produção** (decisão 69).
+- **Fontes:** [LGPD](https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm), [CDC](https://www.planalto.gov.br/ccivil_03/leis/l8078compilado.htm), [Marco Civil da Internet](https://www.planalto.gov.br/ccivil_03/_ato2011-2014/2014/lei/l12965.htm), [CTN](https://www.planalto.gov.br/ccivil_03/leis/l5172compilado.htm).
+- **Descartado:** guardar pedidos para sempre (sem base legal depois do prazo).
+
+## 80. Exportação dos dados em JSON — v2 Etapa 4
+- **Escolha:** botão "Baixar meus dados" (POST com CSRF) devolve `meus-dados-elegancia-crista.json` com a conta e os aceites (`export_user_data`). Sem o hash da senha.
+- **Por quê:** atende acesso e portabilidade (art. 18, II e V) num formato aberto, legível por pessoas e programas, sem dependência nova. POST impede que outro site dispare o download com a sessão da cliente.
+- **Etapa 5:** os pedidos entram na exportação quando forem ligados à conta.
+- **Descartado:** PDF (precisaria de biblioteca nova); CSV (ruim para dados aninhados, como a lista de aceites).
+
+## 81. Troca de e-mail verificada no novo endereço — v2 Etapa 4
+- **Escolha:** a cliente informa o novo e-mail + senha atual; enviamos ao **novo** endereço um link assinado (salt próprio, 24 h, `contas/tokens.py`). O e-mail só muda quando o link é aberto; depois, o endereço **antigo** recebe um aviso.
+- **Contra enumeração:** se o novo e-mail já tem conta, a tela mostra a mesma mensagem e o dono daquele e-mail recebe o aviso de "conta existente" (sem link de troca). O intervalo mínimo entre e-mails (decisão 74) vale para as duas contas.
+- **Segurança:** o token leva o e-mail atual: link antigo ou já usado não vale. Se outro cadastro ocupar o e-mail antes do clique, o `unique` do banco recusa e nada muda.
+- **Descartado:** trocar na hora (permitiria pôr na conta um e-mail de outra pessoa); só pelo atendimento (a correção dependeria de trabalho manual da dona).
+
+## 82. Aviso de cookies apenas informativo — v2 Etapa 4
+- **Escolha:** faixa no pé da tela explicando que só há cookies estritamente necessários (`sessionid`, `csrftoken`, `messages`), com link para a Política e botão "Entendi". A dispensa fica no `localStorage` (não é cookie e não vai ao servidor). Sem JS, a faixa não aparece; a Política tem a tabela completa.
+- **Por quê:** a ANPD orienta que cookies estritamente necessários não dependem de consentimento ([Guia Orientativo: Cookies e proteção de dados pessoais, 2022](https://www.gov.br/anpd/pt-br/centrais-de-conteudo/materiais-educativos-e-publicacoes/processo-guia-orientativo-cookies-e-protecao-de-dados-pessoais.pdf)). Botão "recusar" seria enganoso: recusar quebraria o carrinho e o login. Nenhum cookie de rastreamento ou análise foi adicionado.
+- **Pendência para as Etapas 7 e 8:** reavaliar o aviso quando o Mercado Pago entrar (o Checkout Pro roda no domínio dele, mas qualquer script do gateway nas nossas páginas pode criar cookies de terceiros).
+- **Descartado:** cookie para guardar a dispensa (seria mais um cookie); biblioteca de "consent banner" (dependência para um caso que não precisa de consentimento).
+
+## 83. Histórico de login do axes desligado; auditoria de logs — v2 Etapa 4
+- **Escolha:** `AXES_DISABLE_ACCESS_LOG = True` (o axes deixa de gravar e-mail, IP e navegador de cada login **bem-sucedido**) e `AXES_SENSITIVE_PARAMETERS` explícito (e-mail e IP aparecem como `********` nos avisos do axes). O comando de limpeza esvazia o histórico antigo.
+- **Por quê:** o bloqueio de tentativas não depende do histórico; guardar sem necessidade contraria a minimização (art. 6º, III). O Marco Civil (art. 15) só obriga a guarda de registros de acesso por 6 meses a provedor constituído como **pessoa jurídica**; a loja não tem CNPJ. **Rever quando houver CNPJ.**
+- **Auditoria de logs (o que grava o quê):**
+  - O projeto não tem `LOGGING`, `logger` nem `print` próprios.
+  - Django com `DEBUG=False`: erros 500 iriam para `mail_admins`, mas `ADMINS` está vazio, então nada é enviado. Com `DEBUG=True`, o `runserver` imprime só método, caminho e status (os links de verificação/redefinição aparecem no caminho; só em desenvolvimento).
+  - Backend de e-mail de console (desenvolvimento) imprime os e-mails com nome e links, de propósito (decisão 62). Em produção é SMTP.
+  - axes: avisos mascarados; a senha nunca é registrada.
+  - `limpar_dados_antigos`: só números.
+  - Dados de pagamento: ainda não existem (as Etapas 7 e 8 mantêm a regra "logs sem dados de pagamento").
+
+## 84. Política de Privacidade e Termos de Uso como rascunho versionado — v2 Etapa 4
+- **Escolha:** `templates/loja/privacy.html` (reescrita) e `templates/loja/terms.html` (nova, rota `/termos/`), em linguagem simples, com faixa **"RASCUNHO — pendente de revisão jurídica"** e versão no topo. A Política se baseia no inventário real de dados (README, "Dados pessoais que o site guarda").
+- **Operadores citados:** Mercado Pago (decisão 53), Brevo (decisão 62) e **hospedagem: PROVISÓRIO, empresa não definida** (nenhum nome é citado até a escolha). Entrega: "transportadora ou Correios", genérico.
+- **Backups:** parágrafo explicando que dado apagado pode ficar em cópia antiga até ela expirar, com prazo **PROVISÓRIO de 30 dias** (proposta técnica, sem fundamento legal específico) até a hospedagem ser definida.
+- **Contato de privacidade:** `elegancia.crist@gmail.com`, confirmado pela dona. Prazo de resposta de 15 dias, do art. 19, II.
+- **Descartado:** gerador automático de política (texto genérico, não bate com o que o site faz).
+
+## 85. Loja sem CNPJ por enquanto; identificação do fornecedor pronta para o CNPJ — v2 Etapa 4
+- **Contexto:** o site é um projeto de portfólio do Kauan para uma loja micro, que ainda não tem CNPJ; a dona pretende abrir CNPJ no futuro. Seguir sem CNPJ por enquanto é uma **decisão consciente** do Kauan e da dona.
+- **O que a lei pede:** o Decreto 7.962/2013, art. 2º, I e II ([texto](https://www.planalto.gov.br/ccivil_03/_ato2011-2014/2013/decreto/d7962.htm)), pede no site o nome e o CPF ou CNPJ do fornecedor e o endereço físico e eletrônico.
+- **Escolha:** três variáveis de ambiente, `STORE_LEGAL_NAME`, `STORE_CNPJ` e `STORE_ADDRESS`, lidas no `settings.py` e entregues aos templates por `loja.context_processors.store_info`. Vazias: Política e Termos mostram "[A DEFINIR PELA DONA]" e o rodapé não mostra nada. Preenchidas: aparecem na Política, nos Termos e no rodapé de todas as páginas, **sem mexer em template ou código**.
+- **Cuidados:** só existe campo de **CNPJ** (não de CPF) e o endereço é o **comercial**: o site não deve exibir CPF nem endereço residencial da dona. Nenhum dado pessoal real dela entra no repositório (o `.env` fica fora do Git).
+- **Pendência:** preencher quando o CNPJ existir (decisão 69, item 5).
+- **Descartado:** constantes em `contas/legal.py` (preencher exigiria commit e colocaria dados no Git); model editável no admin (mais código para três textos que mudam uma vez).

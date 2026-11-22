@@ -20,7 +20,21 @@ from .models import User
 
 
 class SignupForm(BaseUserCreationForm):
-    """Cadastro da cliente: nome, sobrenome, e-mail, senha e confirmação."""
+    """Cadastro da cliente: nome, sobrenome, e-mail, senha, confirmação e aceite dos termos."""
+
+    # Aceite da Política de Privacidade e dos Termos de Uso (decisão 77).
+    # BooleanField começa DESMARCADO; required=True faz o formulário recusar
+    # o cadastro sem a marcação. Nunca deixe initial=True aqui: aceite
+    # "pré-marcado" não vale como manifestação livre (LGPD art. 5º XII).
+    # O rótulo com os links fica no template (signup.html).
+    accept_terms = forms.BooleanField(
+        required=True,
+        label='Li e aceito os Termos de Uso e a Política de Privacidade',
+        error_messages={
+            'required': 'Para criar a conta, é preciso ler e aceitar os Termos de Uso '
+                        'e a Política de Privacidade.',
+        },
+    )
 
     class Meta:
         model = User
@@ -108,6 +122,94 @@ class ResetForm(PasswordResetForm):
             if can_send_email(user):
                 mark_email_sent(user)
                 yield user
+
+
+# ---------------------------------------------------------------------------
+# "Minha conta" (v2 Etapa 4)
+# ---------------------------------------------------------------------------
+
+class ProfileForm(forms.ModelForm):
+    """Corrigir nome e sobrenome (LGPD art. 18 III: correção de dados)."""
+
+    class Meta:
+        model = User
+        fields = ('first_name', 'last_name')
+        labels = {'first_name': 'Nome', 'last_name': 'Sobrenome'}
+        widgets = {
+            'first_name': forms.TextInput(attrs={'autocomplete': 'given-name'}),
+            'last_name': forms.TextInput(attrs={'autocomplete': 'family-name'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        """Nome e sobrenome continuam obrigatórios, como no cadastro."""
+        super().__init__(*args, **kwargs)
+        self.fields['first_name'].required = True
+        self.fields['last_name'].required = True
+
+
+class PasswordCheckMixin:
+    """Confere a senha atual da conta. Usado antes de ações sensíveis.
+
+    Pedir a senha de novo protege contra quem encontra o computador com a
+    conta aberta: sem a senha, não troca o e-mail nem exclui a conta.
+    """
+
+    def clean_password(self):
+        """Recusa se a senha digitada não for a da conta."""
+        password = self.cleaned_data.get('password')
+        if not self.user.check_password(password):
+            raise forms.ValidationError('Senha incorreta.')
+        return password
+
+
+class EmailChangeForm(PasswordCheckMixin, forms.Form):
+    """Pedido de troca de e-mail: novo endereço + senha atual (decisão 81).
+
+    NÃO avisa se o novo e-mail já tem conta (seria enumeração): esse caso é
+    tratado na view, com a mesma resposta na tela.
+    """
+
+    new_email = forms.EmailField(
+        label='Novo e-mail',
+        widget=forms.EmailInput(attrs={'autocomplete': 'email'}),
+    )
+    password = forms.CharField(
+        label='Senha atual',
+        strip=False,
+        widget=forms.PasswordInput(attrs={'autocomplete': 'current-password'}),
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        """Recebe a conta logada, para conferir a senha."""
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_new_email(self):
+        """Padroniza o e-mail e recusa o mesmo endereço de hoje."""
+        email = User.objects.normalize_email(self.cleaned_data.get('new_email'))
+        if email == self.user.email:
+            raise forms.ValidationError('Este já é o e-mail da sua conta.')
+        return email
+
+
+class DeleteAccountForm(PasswordCheckMixin, forms.Form):
+    """Confirmação da exclusão da conta: senha atual + caixa de ciência."""
+
+    password = forms.CharField(
+        label='Senha atual',
+        strip=False,
+        widget=forms.PasswordInput(attrs={'autocomplete': 'current-password'}),
+    )
+    confirm = forms.BooleanField(
+        required=True,
+        label='Entendo que a exclusão é definitiva e não pode ser desfeita.',
+        error_messages={'required': 'Marque a caixa para confirmar a exclusão.'},
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        """Recebe a conta logada, para conferir a senha."""
+        self.user = user
+        super().__init__(*args, **kwargs)
 
 
 class AdminUserCreateForm(AdminUserCreationForm):

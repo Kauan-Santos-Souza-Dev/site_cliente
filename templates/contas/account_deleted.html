@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{# Conta excluída (view contas.views.account_deleted). #}
+
+{% block title %}Conta excluída — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Conta excluída</h1>
+    <p>Seus dados de cadastro foram apagados. Obrigada por ter passado por aqui.</p>
+    <a class="botao botao--largo" href="{% url 'home' %}">Voltar ao início</a>
+  </div>
+</section>
+{% endblock %}

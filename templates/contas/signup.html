@@ -23,6 +23,25 @@
       <p class="campo__dica">Use pelo menos 10 caracteres. Evite senhas óbvias ou parecidas com seu nome ou e-mail.</p>
       {% include 'pedidos/_campo.html' with field=form.password2 %}
 
+      {% comment %}
+        Aceite dos Termos e da Política (decisão 77). A caixa vem DESMARCADA:
+        aceite pré-marcado não vale. Os links abrem em nova aba para a cliente
+        não perder o que já digitou. Ao enviar, a view grava a versão dos
+        textos e a data/hora (model Consent).
+      {% endcomment %}
+      {% with field=form.accept_terms %}
+      <div class="campo campo--caixa{% if field.errors %} campo--erro{% endif %}">
+        {{ field }}
+        <label for="{{ field.id_for_label }}">
+          Li e aceito os <a href="{% url 'terms' %}" target="_blank" rel="noopener">Termos de Uso</a>
+          e a <a href="{% url 'privacy' %}" target="_blank" rel="noopener">Política de Privacidade</a>.
+        </label>
+        {% if field.errors %}
+          <p class="campo__erro" id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</p>
+        {% endif %}
+      </div>
+      {% endwith %}
+
       <p class="aviso-lgpd">Depois do cadastro, enviamos um link para o seu e-mail. Confirme por ele para poder finalizar compras.</p>
       <button class="botao botao--largo" type="submit">Criar conta</button>
     </form>
