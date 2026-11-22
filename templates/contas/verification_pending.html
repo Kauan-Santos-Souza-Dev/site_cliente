@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% comment %}
+  Logada, mas sem confirmar o e-mail (view contas.views.verification_pending).
+  O decorator verified_email_required manda para cá quem tenta finalizar a compra.
+{% endcomment %}
+
+{% block title %}Confirme seu e-mail — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Confirme seu e-mail</h1>
+    <p>Para finalizar compras, precisamos confirmar que o e-mail <strong>{{ user.email }}</strong> é seu.
+      Abra o link que enviamos (ele vale por 24 horas).</p>
+    <p>Enquanto isso, você pode continuar navegando e montando o carrinho.</p>
+
+    {# POST com CSRF: um link em outro site não consegue disparar e-mails em nome da cliente. #}
+    <form method="post" action="{% url 'resend_verification' %}">
+      {% csrf_token %}
+      <button class="botao botao--largo" type="submit">Reenviar o link</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

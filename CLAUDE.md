@@ -102,8 +102,9 @@ Atualize também a seção "Fluxo de cada parte" do `README.md` com a etapa conc
 - **E-mail da loja:** ainda não confirmado (vale para o contato e para o remetente).
 
 ### Dependências da v2
-- **Aprovadas:** `argon2-cffi`.
-- **Pedir aprovação na etapa em que forem usadas:** `django-axes` e `django-otp` + `qrcode` (Etapa 3), `mercadopago` (Etapa 7).
+- **Aprovadas e instaladas:** `argon2-cffi` (Etapa 2); `django-axes`, `django-otp` e `qrcode` (Etapa 3).
+- **Pedir aprovação na etapa em que for usada:** `mercadopago` (Etapa 7).
+- **E-mail:** só o backend de console até o Kauan enviar as credenciais do Brevo.
 
 ## Regras inegociáveis de segurança (v2)
 - **Dados de cartão NUNCA passam pelo nosso servidor**, nem em log. Usar checkout hospedado ou tokenização do gateway.

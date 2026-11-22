@@ -48,6 +48,8 @@ def home(request):
 
 def catalog(request):
     """Catálogo com filtro opcional por categoria (?categoria=vestidos) e paginação."""
+    # Pega a lista base de produtos. active_products() devolve só os produtos com
+    # is_active=True. Assim, um produto escondido no admin nunca aparece para a cliente.
     products = active_products()
     current_category = None
 

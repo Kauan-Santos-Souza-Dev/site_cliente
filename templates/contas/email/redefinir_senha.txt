@@ -1,0 +1,12 @@
+{% autoescape off %}Olá, {{ user.first_name }}!
+
+Recebemos um pedido para criar uma senha nova na sua conta da Elegância Cristã. Para continuar, abra o link:
+
+{{ protocol }}://{{ domain }}{% url 'password_reset_confirm' uidb64=uid token=token %}
+
+O link vale por 1 hora e só pode ser usado uma vez.
+
+Se não foi você que pediu, ignore esta mensagem: sua senha continua a mesma.
+
+Elegância Cristã
+{% endautoescape %}

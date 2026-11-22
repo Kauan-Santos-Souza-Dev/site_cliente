@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% comment %}
+  Depois de QUALQUER cadastro válido (view contas.views.signup_done).
+  O texto é o mesmo para e-mail novo e já cadastrado: não revela nada.
+{% endcomment %}
+
+{% block title %}Confira seu e-mail — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Confira seu e-mail</h1>
+    <p>Se for possível usar este e-mail, enviamos uma mensagem para ele com os próximos passos.
+      O link de confirmação vale por <strong>24 horas</strong>.</p>
+    <p>Não chegou? Olhe a caixa de spam. Se você já tem conta, é só
+      <a href="{% url 'login' %}">entrar</a> ou <a href="{% url 'password_reset' %}">redefinir a senha</a>.</p>
+    <p>Seu carrinho continua guardado neste aparelho.</p>
+  </div>
+</section>
+{% endblock %}

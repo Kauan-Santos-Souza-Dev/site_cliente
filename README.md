@@ -4,8 +4,8 @@ Site de uma loja de roupas femininas (vestidos, saias e conjuntos) com temática
 Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, Django e Django REST Framework.
 
 > Status: **v1 concluída** (etapas 1 a 8, tag `v1.0`). **v2 em desenvolvimento** na branch `v2`
-> (pagamento online, contas de clientes e parcelamento): etapas 1 e 2 de 9 concluídas.
-> ⚠️ **Não publique a v2 antes da etapa 3** (ainda sem bloqueio de tentativas de login; decisão 69).
+> (pagamento online, contas de clientes e parcelamento): etapas 1 a 3 de 9 concluídas.
+> ⚠️ **A v2 ainda não pode ir ao ar** (faltam LGPD, pagamento e a revisão final; o e-mail ainda sai só no console).
 > O roteiro completo está no [CLAUDE.md](CLAUDE.md) e as decisões técnicas em [DECISIONS.md](DECISIONS.md).
 
 ## Versões
@@ -31,14 +31,17 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
    ```
 3. **Criar o banco e o usuário no MySQL** (rode no MySQL Workbench, como administrador). Troque `SUA_SENHA_AQUI` por uma senha forte:
    ```sql
-   CREATE DATABASE elegancia_crista CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE DATABASE elegancia_crista CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
    CREATE USER 'elegancia'@'localhost' IDENTIFIED BY 'SUA_SENHA_AQUI';
    GRANT ALL PRIVILEGES ON elegancia_crista.* TO 'elegancia'@'localhost';
+   -- Banco que o Django cria ao rodar os testes. "\_" porque "_" é curinga no GRANT.
+   GRANT ALL PRIVILEGES ON `test\_elegancia\_crista`.* TO 'elegancia'@'localhost';
    FLUSH PRIVILEGES;
    ```
-   O usuário precisa de todos os privilégios nesse banco porque as migrations criam tabelas.
-   Ao rodar os testes, o Django também cria um banco `test_elegancia_crista`;
-   se der erro de permissão, rode também: `GRANT ALL PRIVILEGES ON test_elegancia_crista.* TO 'elegancia'@'localhost';`
+   **Nunca use o `root` no `.env`** (decisão 70): o site só precisa do banco da loja. O usuário
+   tem todos os privilégios **nesses dois bancos** porque as migrations criam e alteram tabelas.
+   A senha fica só no `.env`. Para gerar uma senha forte:
+   `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 4. **Configurar o `.env`:** copie `.env.example` para `.env` e preencha:
    ```powershell
    copy .env.example .env
@@ -63,15 +66,33 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
    python manage.py createsuperuser
    ```
    O comando pede e-mail e senha (mínimo de 10 caracteres).
+8. **Configurar o 2FA do admin** (obrigatório para entrar no `/admin/`, decisão 75):
+   ```powershell
+   python manage.py configurar_2fa seu-email@exemplo.com
+   ```
+   Leia o QR Code com um app autenticador (Google Authenticator, Microsoft Authenticator, Aegis...)
+   e **guarde os 10 códigos de backup** em lugar seguro: eles aparecem uma única vez.
+   No login do admin: e-mail, senha, escolha o dispositivo ("Celular" ou "Códigos de backup") e digite o código.
+9. **Criar o grupo de permissões "Loja"** (decisão 76):
+   ```powershell
+   python manage.py criar_grupos
+   ```
+
+### Recuperar o acesso ao admin (2FA)
+- **Perdeu o celular:** entre com um **código de backup** (cada um vale uma vez) e depois refaça o 2FA.
+- **Perdeu o celular e os códigos:** alguém com acesso ao servidor roda
+  `python manage.py configurar_2fa seu-email@exemplo.com --redefinir` (apaga o 2FA antigo e cria um novo).
+- **Bloqueada por tentativas erradas** (15 minutos): espere, ou rode `python manage.py axes_reset`.
 
 ### Recriar o banco de desenvolvimento
 Necessário uma vez, ao passar da v1 para a v2: a troca do modelo de usuário (v2 etapa 2, decisão 64)
 não funciona num banco que já tem as tabelas da v1. **Apaga todos os dados**, use só em desenvolvimento.
 ```sql
 DROP DATABASE elegancia_crista;
-CREATE DATABASE elegancia_crista CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE elegancia_crista CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 ```
-Depois: `python manage.py migrate`, `python manage.py carregar_exemplos` e `python manage.py createsuperuser`.
+Depois: `python manage.py migrate`, `python manage.py carregar_exemplos`, `python manage.py createsuperuser`,
+`python manage.py configurar_2fa <email>` e `python manage.py criar_grupos`.
 
 ## Variáveis de ambiente
 | Variável | Para que serve |
@@ -83,17 +104,27 @@ Depois: `python manage.py migrate`, `python manage.py carregar_exemplos` e `pyth
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | Conexão com o MySQL |
 | `WHATSAPP_NUMBER` | Número da loja (só dígitos, com DDI e DDD) |
 | `CONTACT_EMAIL` | E-mail de contato (confirmar com a loja antes de publicar) |
+| `EMAIL_BACKEND` | Vazio = e-mails só no terminal (desenvolvimento). Produção: SMTP do Brevo (a configurar) |
+| `DEFAULT_FROM_EMAIL` | Remetente dos e-mails (vazio = `Elegância Cristã <nao-responder@localhost>`) |
 
 ## Estrutura de pastas
 ```
 PROJETO/
 ├── config/          # settings, urls, wsgi (configuração do projeto)
 ├── contas/          # (v2) usuário próprio com login por e-mail, cadastro, login, logout
-│   ├── models.py      # User (sem username) e UserManager (e-mail em minúsculas)
-│   ├── forms.py       # SignupForm, LoginForm e formulários do admin
-│   ├── views.py       # signup + get_safe_next_url (contra open redirect)
-│   ├── urls.py        # /conta/entrar/, /conta/sair/ (views do Django), /conta/cadastro/
-│   └── admin.py       # admin de usuários adaptado ao e-mail
+│   ├── models.py      # User (sem username, e-mail verificado) e UserManager (e-mail em minúsculas)
+│   ├── forms.py       # SignupForm, LoginForm, ResetForm e formulários do admin
+│   ├── views.py       # cadastro genérico, verificação de e-mail e reenvio do link
+│   ├── urls.py        # /conta/...: login, logout, cadastro, verificação, esqueci a senha
+│   ├── tokens.py      # token assinado do link de verificação (24 h)
+│   ├── emails.py      # envio dos e-mails de segurança + limite de 1 a cada 2 min
+│   ├── decorators.py  # verified_email_required (protege o checkout)
+│   ├── axes.py        # padroniza o e-mail para o bloqueio de tentativas
+│   ├── admin_site.py  # admin com 2FA obrigatório (OTPAdminSite)
+│   ├── admin_config.py # troca o admin padrão pelo admin com 2FA
+│   ├── admin.py       # admin de usuários adaptado ao e-mail
+│   ├── test_utils.py  # ajudantes dos testes (conta verificada, login no admin com 2FA)
+│   └── management/commands/  # configurar_2fa, criar_grupos
 ├── loja/            # catálogo: models, views, urls, admin, validadores, testes
 │   ├── serializers.py # API: models → JSON
 │   ├── api_views.py   # API: endpoints de leitura
@@ -118,7 +149,8 @@ PROJETO/
 │   ├── loja/          # home, catalog, product_detail, about, contact, privacy
 │   │                  # e _product_card.html (cartão reutilizado)
 │   ├── carrinho/      # cart_detail.html
-│   ├── contas/        # login.html e signup.html
+│   ├── contas/        # login, cadastro, verificação, esqueci a senha, bloqueio
+│   │   └── email/     # textos dos e-mails (verificação, aviso de cadastro, nova senha)
 │   └── pedidos/       # checkout, confirmation e _campo.html (campo com rótulo e erro)
 ├── static/
 │   ├── css/style.css  # todo o visual do site
@@ -281,7 +313,68 @@ POST /conta/cadastro/  →  config/urls.py ('conta/')  →  contas/urls.py ('cad
 - Login errado mostra sempre "E-mail ou senha incorretos", exista o e-mail ou não.
 - **Carrinho:** montado como visitante, continua depois do login e do cadastro; é apagado no logout.
 - **Admin → Contas → Usuários:** lista com e-mail, nome, ativo, equipe e data de cadastro; busca por e-mail ou nome.
-- Ainda não existe: verificação de e-mail, "esqueci a senha" e bloqueio de tentativas (etapa 3); pedido ligado à conta (etapa 5).
+- Ainda não existe: pedido ligado à conta e "Meus pedidos" (etapa 5).
+
+> **Mudou na etapa 3:** o cadastro não faz mais login automático e mostra sempre "Confira seu e-mail" (veja abaixo).
+
+### Segurança da conta (app `contas/`) — v2 etapa 3
+| Endereço | View | O que faz |
+|---|---|---|
+| `/conta/cadastro/` → `/conta/cadastro/enviado/` | `signup`, `signup_done` | Cadastro com resposta sempre igual; sem login |
+| `/conta/verificar/<token>/` | `verify_email` | Link do e-mail (24 h): marca o e-mail como verificado |
+| `/conta/verificacao-pendente/` | `verification_pending`, `resend_verification` | Explica e reenvia o link (POST, 1 a cada 2 min) |
+| `/conta/senha/esqueci/` ... `/conta/senha/alterada/` | views do Django + `ResetForm` | Esqueci a senha (link de 1 h, uso único) |
+| `/admin/` | `LojaAdminSite` | Login com e-mail, senha e código 2FA |
+
+**Caminho de um cadastro:**
+```
+POST /conta/cadastro/ → config/urls.py → contas/urls.py → contas/views.py::signup
+  → SignupForm.is_valid() (contas/forms.py): campos e senha; NÃO avisa e-mail repetido
+  → register_signup():
+       e-mail novo           → form.save() (hash Argon2) → emails.send_verification_email
+       conta verificada      → make_password (só gasta tempo) → emails.send_account_exists_email
+       conta não verificada  → troca nome e senha → emails.send_verification_email
+       (emails.can_send_email: no máximo 1 e-mail a cada 2 min por conta)
+  → redirect /conta/cadastro/enviado/ → templates/contas/signup_done.html (sempre a mesma página)
+```
+
+**Caminho do link de verificação:**
+```
+GET /conta/verificar/<token>/ → contas/views.py::verify_email
+  → tokens.get_user_from_verification_token: assinatura ok? menos de 24 h? e-mail igual?
+       não → templates/contas/verify_invalid.html (400)
+       sim → user.email_verified = True → templates/contas/verify_done.html
+```
+
+**Checkout protegido:** `pedidos.views.checkout` tem `@verified_email_required`
+(`contas/decorators.py`): visitante → login (com `next`); conta sem verificar → página pendente.
+
+**Bloqueio de tentativas (django-axes):** 5 senhas erradas para o mesmo **e-mail + IP** → 15 minutos de
+bloqueio (página `contas/bloqueado.html`, status 429). Vale também para o `/admin/`. A página é a mesma
+exista o e-mail ou não. Desbloquear: `python manage.py axes_reset` ou admin → Axes.
+
+**Caminho de um login bloqueado (6ª tentativa, mesmo e-mail + IP):**
+```
+POST /conta/entrar/ → contas/urls.py → LoginView do Django (LoginForm, contas/forms.py)
+  → authenticate() percorre AUTHENTICATION_BACKENDS (config/settings.py), em ordem:
+       1. axes.AxesStandaloneBackend → contas/axes.py::get_axes_username (e-mail em minúsculas)
+          → AccessAttempt (banco) já tem 5 falhas há menos de 15 min → RECUSA
+       2. ModelBackend (confere a senha) → nem chega a rodar
+  → axes.middleware.AxesMiddleware vê o bloqueio → templates/contas/bloqueado.html (status 429)
+```
+
+**Caminho do login no admin com 2FA:**
+```
+POST /admin/login/ → config/urls.py → admin.site = contas/admin_site.py::LojaAdminSite (OTPAdminSite)
+  → formulário do django-otp: e-mail + senha + dispositivo + código
+       → authenticate() (o axes também conta aqui) → senha ok?
+       → device.verify_token(código): TOTP do celular (30 s) ou código de backup (apagado ao usar)
+  → login + marca na sessão "passou pelo 2FA" → OTPMiddleware: request.user.is_verified() = True
+  → LojaAdminSite.has_permission(): is_staff E is_verified → painel /admin/
+```
+
+**Para testar no navegador:** com o `runserver` aberto, os e-mails aparecem **no terminal**. Copie o
+link de lá e cole no navegador.
 
 ## Testes
 Rode todos os testes (o Django cria um banco de testes temporário e apaga no fim):
@@ -295,7 +388,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
 | `pedidos/tests.py` | Checkout cria pedido e itens, preço guardado, estoque descontado, cancelamento devolve estoque, mensagem do WhatsApp, admin de pedidos, limite por IP, CSRF |
-| `contas/tests.py` | Senha em Argon2, e-mail em minúsculas (no cadastro e no login), nome obrigatório, senhas fracas, mesma mensagem para e-mail inexistente e senha errada, carrinho após login e cadastro, logout só por POST, `next` externo ignorado, admin de usuários |
+| `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login |
 
 ## Segurança
 | Proteção | Onde |
@@ -311,9 +404,15 @@ Ou só os de um app: `python manage.py test pedidos`.
 | Limite de 5 pedidos por hora por IP | `pedidos/rate_limit.py` |
 | LGPD: só os dados necessários, aviso no checkout, página de Privacidade | `templates/pedidos/checkout.html`, `templates/loja/privacy.html` |
 | Senhas com hash Argon2 e mínimo de 10 caracteres | `PASSWORD_HASHERS` e `AUTH_PASSWORD_VALIDATORS` em `config/settings.py` |
-| Login não revela se o e-mail existe (enumeração) | `contas/forms.py::LoginForm` |
+| Login, cadastro, bloqueio e "esqueci a senha" não revelam se o e-mail existe (enumeração) | `contas/forms.py`, `contas/views.py::register_signup`, `templates/contas/bloqueado.html` |
+| Força bruta: 5 erros → 15 min de bloqueio por e-mail + IP (site e admin) | `django-axes`, `AXES_*` em `config/settings.py`, `contas/axes.py` |
+| 2FA obrigatório no admin (app autenticador + códigos de backup) | `contas/admin_site.py`, `contas/admin_config.py`, `configurar_2fa` |
+| E-mail verificado para comprar; cadastro sem login; anti pré-sequestro | `contas/decorators.py`, `contas/views.py`, `contas/tokens.py` |
+| Limite de e-mails de segurança (1 a cada 2 min por conta) | `contas/emails.py::can_send_email` |
+| Banco acessado por usuário com acesso só ao banco da loja | `.env`, README (instalação) |
+| Grupo "Loja" sem acesso a contas de clientes e à segurança | `contas/management/commands/criar_grupos.py` |
 | Código da sessão trocado no login (*session fixation*); logout só por POST | `LoginView`/`LogoutView` do Django, `contas/urls.py` |
-| `next` só para páginas do próprio site (*open redirect*) | `contas/views.py::get_safe_next_url`, `LoginView` |
+| `next` só para páginas do próprio site (*open redirect*) | `LoginView` do Django |
 
 ## Checklist antes de publicar
 - [ ] Gerar uma **nova `SECRET_KEY`** para produção (nunca reaproveitar a de desenvolvimento).
@@ -322,10 +421,13 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] Senha do MySQL forte e diferente da de desenvolvimento.
 - [ ] `python manage.py migrate` e `python manage.py collectstatic` (copia os estáticos para `staticfiles/`, que o servidor web serve, junto com `media/`).
 - [ ] `python manage.py check --deploy`: devem sobrar só os avisos `W005` e `W021` (HSTS em subdomínios e *preload*), desligados de propósito (veja DECISIONS.md, decisão 48).
-- [ ] **v2: não publicar antes da etapa 3** (bloqueio de tentativas de login e cadastro sem revelar e-mail; decisão 69).
-- [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**. O admin não tem bloqueio após várias senhas erradas.
+- [ ] **v2: não publicar antes da etapa 9** (decisão 69).
+- [ ] Banco com usuário **dedicado** (nunca `root`) e senha forte, diferente da de desenvolvimento (decisão 70).
+- [ ] **E-mail de verdade:** configurar o SMTP do Brevo (`EMAIL_BACKEND` e credenciais no `.env`) e um `DEFAULT_FROM_EMAIL` de um domínio da loja. Com o backend de console, ninguém recebe o link de verificação nem o de nova senha.
+- [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**, rodar `configurar_2fa` e guardar os códigos de backup; rodar `criar_grupos`.
+- [ ] **IP real atrás de proxy** (Nginx, Cloudflare...): sem isso, o bloqueio de tentativas (axes) e o limite de pedidos tratam todas as clientes como **um único IP** (o do proxy) e bloqueiam todo mundo junto. Configure só se houver proxy **de confiança** na frente: `AXES_IPWARE_PROXY_COUNT = 1` (número de proxies) e `AXES_IPWARE_META_PRECEDENCE_ORDER = ['HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR']`, e ajuste `pedidos/rate_limit.py` do mesmo jeito. **Perigo:** ligar isso **sem** proxy deixa qualquer pessoa inventar o cabeçalho `X-Forwarded-For` e trocar de IP a cada tentativa, fugindo do bloqueio.
+- [ ] Conferir que `python manage.py axes_reset` funciona no servidor (desbloqueio de emergência).
 - [ ] Depois de alguns dias com o HTTPS funcionando, aumentar `SECURE_HSTS_SECONDS` (ex.: `31536000`, 1 ano).
-- [ ] Se houver proxy (Nginx, Cloudflare...), configurar o IP real da visitante. Sem isso, o limite de pedidos trataria todas as clientes como um único IP.
 - [ ] Rodar `python manage.py test` uma última vez.
 
 ## Roteiro da v2

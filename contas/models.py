@@ -72,6 +72,8 @@ class UserManager(BaseUserManager):
         """Cria a conta de administração (usado pelo `createsuperuser`)."""
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
+        # Conta criada no servidor por quem administra: e-mail já conhecido.
+        extra_fields.setdefault('email_verified', True)
         if extra_fields.get('is_staff') is not True:
             raise ValueError('O superusuário precisa de is_staff=True.')
         if extra_fields.get('is_superuser') is not True:
@@ -86,6 +88,14 @@ class User(AbstractUser):
     username = None
     # unique=True: o banco recusa dois usuários com o mesmo e-mail.
     email = models.EmailField('e-mail', unique=True)
+    # A cliente provou que o e-mail é dela (clicou no link de verificação).
+    # Só com isso ela pode finalizar uma compra (decisão 72).
+    email_verified = models.BooleanField('e-mail verificado', default=False)
+    # Quando enviamos o último e-mail de segurança (verificação, aviso de
+    # cadastro ou redefinição de senha). Serve para limitar a frequência e
+    # evitar que alguém "bombardeie" a caixa de entrada de outra pessoa.
+    # Fica no banco (não no cache) para valer em todos os processos.
+    last_email_sent_at = models.DateTimeField('último e-mail enviado em', null=True, blank=True)
 
     # Campo usado como "nome de login" pelo Django (login, admin, createsuperuser).
     USERNAME_FIELD = 'email'

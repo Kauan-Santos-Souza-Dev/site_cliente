@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% comment %}
+  Página do bloqueio de tentativas (django-axes, AXES_LOCKOUT_TEMPLATE).
+  O axes manda o e-mail digitado no contexto ("username"), mas ele NÃO é
+  mostrado: o texto é idêntico para e-mail cadastrado ou não (decisão 71).
+{% endcomment %}
+
+{% block title %}Muitas tentativas — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Muitas tentativas</h1>
+    <p>Por segurança, o acesso foi pausado depois de várias tentativas sem sucesso.
+      Aguarde <strong>15 minutos</strong> e tente de novo.</p>
+    <p>Esqueceu a senha? <a href="{% url 'password_reset' %}">Redefina por aqui</a>.</p>
+  </div>
+</section>
+{% endblock %}

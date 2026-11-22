@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{# Link de verificação adulterado ou vencido (view contas.views.verify_email). #}
+
+{% block title %}Link inválido — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">Link inválido ou vencido</h1>
+    <p>O link de confirmação vale por 24 horas e só funciona para o e-mail para o qual foi enviado.</p>
+    <p>Para receber um link novo, <a href="{% url 'login' %}">entre na sua conta</a>:
+      vamos mostrar o botão de reenvio.</p>
+  </div>
+</section>
+{% endblock %}

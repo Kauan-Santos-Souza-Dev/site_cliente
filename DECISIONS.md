@@ -16,6 +16,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | 8 | Testes, revisão de segurança e documentação | 47 a 50 |
 | v2 · 1 | Preparação da v2: versionamento, gateway e decisões de negócio | 51 a 63 |
 | v2 · 2 | Usuário customizado e autenticação básica | 64 a 69 |
+| v2 · 3 | Segurança da conta | 70 a 76 (e atualiza 65, 66 e 69) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -343,14 +344,17 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Descartado:** `AbstractBaseUser` (teríamos de reescrever permissões e campos que o `AbstractUser` já tem); campo único "nome completo" (exigiria reescrever o admin e os métodos de nome do Django).
 - **Regra para o código:** nunca importar `django.contrib.auth.models.User`. Use `get_user_model()` (ou `settings.AUTH_USER_MODEL` em `ForeignKey`).
 
-## 65. Login e logout com as views do Django — v2 Etapa 2
+## 65. Login e logout com as views do Django — v2 Etapa 2 (atualizada na v2 Etapa 3)
 - **Escolha:** `/conta/entrar/` e `/conta/sair/` usam `LoginView` e `LogoutView` do próprio Django, só configurados em `contas/urls.py`. O cadastro (`/conta/cadastro/`) é uma view em função nossa.
 - **Por quê (exceção à decisão 20):** em autenticação, código pronto e revisado por muita gente é mais seguro que código novo. Essas views já validam o `next` contra *open redirect*, trocam o código da sessão no login e, no logout, só aceitam **POST** (um link ou `<img>` em outro site não consegue deslogar a cliente).
-- **Open redirect no cadastro:** `contas/views.py::get_safe_next_url` usa `url_has_allowed_host_and_scheme`, a mesma verificação do `LoginView`. Um link `?next=https://site-falso` cai na página inicial.
+- **Open redirect:** o `LoginView` só aceita `next` do próprio site (`url_has_allowed_host_and_scheme`). Um link `?next=https://site-falso` cai na página inicial. Testado.
+- **Etapa 3:** o cadastro deixou de fazer login (decisão 73), então perdeu o `next` e a função `get_safe_next_url` foi removida. A redefinição de senha também usa as views prontas do Django (decisão 74).
 
-## 66. Mensagens que não revelam e-mail no login; risco aceito no cadastro — v2 Etapa 2
+## 66. Mensagens que não revelam e-mail (login e cadastro) — v2 Etapa 2 (atualizada na v2 Etapa 3)
 - **Login:** a mesma frase ("E-mail ou senha incorretos...") para e-mail inexistente e senha errada (`contas/forms.py::LoginForm`). Assim ninguém descobre quem é cliente testando e-mails (**enumeração**). Há teste comparando as duas respostas.
-- **Cadastro (risco aceito temporariamente):** "Já existe uma conta com este e-mail" revela que o e-mail existe. A forma segura (responder sempre "enviamos um e-mail para confirmar") depende da verificação de e-mail da **v2 Etapa 3**, quando esta mensagem será trocada.
+- **Cadastro (Etapa 2):** mostrava "Já existe uma conta com este e-mail", um risco aceito só durante o desenvolvimento.
+- **Cadastro (Etapa 3, resolvido):** a resposta é **sempre** a página "Confira seu e-mail", seja o e-mail novo, já verificado ou não verificado. Para isso, o `SignupForm` desliga a checagem de unicidade do `ModelForm` (`validate_unique`), que sozinha avisaria "já existe". O que muda acontece só na caixa de entrada da dona do e-mail (decisão 73). Teste compara as três respostas byte a byte.
+- **Também não revelam:** o bloqueio de tentativas (decisão 71) e o "esqueci a senha" (decisão 74).
 
 ## 67. Carrinho no login (mantido) e no logout (apagado) — v2 Etapa 2
 - **Login e cadastro:** `django.contrib.auth.login()` chama `cycle_key()`: gera um **código de sessão novo**, mas **copia os dados**, então o carrinho continua. O código novo protege contra *session fixation* (alguém que plantou ou conhecia o código antigo não "herda" a conta logada). Testado.
@@ -360,6 +364,61 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** `MinimumLengthValidator` com `min_length: 10` (o padrão do Django é 8), mais os validadores padrão: parecida com nome/e-mail, lista de senhas comuns, só números. Vale para o site, o admin e o `createsuperuser`.
 - **Por quê:** o tamanho é o fator que mais aumenta o número de tentativas necessárias para adivinhar uma senha. Exigir símbolos e maiúsculas, em vez disso, costuma gerar senhas previsíveis ("Senha@123").
 
-## 69. O site NÃO deve ser publicado antes da v2 Etapa 3 — v2 Etapa 2
+## 69. O site NÃO deve ser publicado antes da v2 Etapa 3 — v2 Etapa 2 (atualizada na v2 Etapa 3)
 - **Situação ao fim da Etapa 2:** (1) o login do site e do admin **não bloqueia tentativas repetidas** (força bruta), e (2) o cadastro **revela se um e-mail está cadastrado** (decisão 66).
 - **Consequência:** a branch `v2` serve só para desenvolvimento até a v2 Etapa 3 resolver os dois pontos (bloqueio de tentativas e cadastro com resposta genérica + verificação de e-mail). O checklist do README repete o aviso.
+- **Etapa 3:** os dois pontos foram resolvidos (decisões 71 e 73). A v2 continua **sem ir ao ar** até a v2 Etapa 9: faltam LGPD, pagamento e a revisão final, e o e-mail ainda sai só no console.
+
+## 70. MySQL com usuário dedicado, sem root — v2 Etapa 3
+- **Situação encontrada:** o `.env` conectava como `root` (contrariando a decisão 8) e o usuário `elegancia` não existia.
+- **Escolha:** usuário `elegancia@localhost` com `ALL PRIVILEGES` **só** em `elegancia_crista` e em `test_elegancia_crista` (o banco que o Django cria nos testes). A senha foi gerada aleatoriamente (`secrets.token_urlsafe`) e gravada só no `.env`; não aparece no repositório nem em nenhum log.
+- **Por quê:** princípio do **menor privilégio**. Se o site for invadido (ex.: uma falha que permita rodar SQL), o estrago fica limitado ao banco da loja. Com `root`, o invasor teria todos os bancos do servidor e poderia criar usuários.
+- **No `GRANT`:** `_` é curinga no nome do banco, por isso o comando usa `test\_elegancia\_crista`.
+- **Observação:** existe no MySQL local um usuário `Kauan@'%'` (`%` = aceita conexão de qualquer máquina). Não é usado pelo projeto; vale conferir se ele é necessário e se tem senha forte.
+
+## 71. Bloqueio de tentativas com django-axes — v2 Etapa 3
+- **Escolha:** `django-axes` (aprovado) com **5 erros → 15 minutos** de bloqueio do **par e-mail + IP** (`AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]`). Login certo zera o contador. Vale para o site e para o admin.
+- **Contra o quê:** força bruta (testar milhares de senhas). Com 5 tentativas a cada 15 minutos, adivinhar uma senha de 10+ caracteres fica inviável.
+- **Como funciona:** o `AxesStandaloneBackend` vem **antes** do `ModelBackend` em `AUTHENTICATION_BACKENDS`: se o par está bloqueado, ele recusa antes de a senha ser conferida (nem a senha certa entra). As falhas ficam no **banco** (`AccessAttempt`), o que vale para todos os processos (diferente do cache em memória da decisão 47). O `AxesMiddleware` transforma o bloqueio na página `contas/bloqueado.html` com status **429**.
+- **Não revela e-mail:** o axes conta o texto digitado, exista a conta ou não, e a página não mostra o e-mail. Teste compara o bloqueio de um e-mail cadastrado com o de um inexistente.
+- **Padronização do e-mail (`contas/axes.py`):** sem ela, variar maiúsculas daria 5 tentativas novas a cada variação. **Bug pego pelos testes:** o axes chama essa função com as credenciais em duas formas (chave `email` antes de conferir a senha e `username` ao registrar a falha). A primeira versão lia só `username`: as falhas eram gravadas, a página de bloqueio aparecia, mas **a senha certa ainda entrava**. Corrigido e coberto por teste.
+- **Logs:** o axes já mascara e-mail e IP nas mensagens (`********`).
+- **Limitações:** (1) um ataque distribuído (muitos IPs contra um e-mail) ganha 5 tentativas por IP; a senha longa e o 2FA do admin cobrem esse caso. (2) Atrás de proxy, é preciso configurar o IP real (checklist do README), senão todas as clientes viram "o mesmo IP".
+- **Desbloquear:** `python manage.py axes_reset` (tudo) ou admin → Axes → tentativas de acesso.
+- **Descartado:** bloqueio só por e-mail (um atacante travaria a conta de qualquer cliente de propósito); só por IP (clientes atrás do mesmo Wi-Fi seriam bloqueadas juntas).
+
+## 72. Verificação de e-mail com token assinado; checkout só para conta verificada — v2 Etapa 3
+- **Model:** `User.email_verified` (começa `False`; o `createsuperuser` e a migration `0002` deixam as contas do admin verificadas) e `User.last_email_sent_at` (limite de frequência, decisão 73).
+- **Token (`contas/tokens.py`):** `django.core.signing.dumps({uid, email})` com *salt* próprio, conferido com `max_age` de **24 horas**. A assinatura (com a `SECRET_KEY`) impede falsificar o token; o e-mail dentro dele faz o link morrer se o e-mail da conta mudar. Não há tabela de tokens. O link não é de uso único, mas abrir de novo não faz mal (a conta só continua verificada).
+- **Descartado:** tabela de tokens (mais código e limpeza periódica); reaproveitar o gerador de token do "esqueci a senha" (a validade dele é global, `PASSWORD_RESET_TIMEOUT`, e queremos 24 h aqui e 1 h lá).
+- **Quem pode o quê:** a conta não verificada **entra** e **monta o carrinho**, mas não finaliza a compra. `contas/decorators.py::verified_email_required` protege `pedidos.views.checkout`: sem login → login com `next`; sem verificar → `/conta/verificacao-pendente/`, com botão "Reenviar o link" (POST + CSRF + limite de frequência).
+- **Adiantado da Etapa 5 (decisão do Kauan):** exigir conta no checkout. A ligação `Order → usuário` continua na Etapa 5.
+
+## 73. Cadastro com resposta genérica, sem login, contra pré-sequestro — v2 Etapa 3
+- **Escolha:** o cadastro **nunca** faz login e sempre leva à página "Confira seu e-mail" (decisão 66). Por trás (`contas/views.py::register_signup`):
+  - e-mail **novo** → cria a conta e envia o link;
+  - e-mail de conta **verificada** → não muda nada; envia à dona um **aviso** ("alguém tentou criar conta com seu e-mail") com links de login e de nova senha;
+  - e-mail de conta **não verificada** → o cadastro novo **substitui nome e senha** e envia link novo.
+- **Pré-sequestro (por que substituir):** sem isso, um atacante poderia cadastrar o e-mail da vítima com uma senha que ele conhece; quando a vítima clicasse no link, a conta ficaria verificada e o atacante entraria nela. Substituindo a senha, a do atacante deixa de valer, e as sessões dele caem (o Django invalida sessões quando a senha muda). Custo aceito: alguém pode trocar a senha de uma conta **ainda não verificada**; a dona legítima recupera com um novo cadastro ou "esqueci a senha".
+- **Mail bombing:** no máximo **1 e-mail de segurança a cada 2 minutos por conta** (`contas/emails.py::can_send_email`, guardado no banco). Vale para verificação, aviso e "esqueci a senha". A tela não muda quando o envio é segurado.
+- **Tempo de resposta:** no caso "conta verificada", o código calcula um hash Argon2 à toa para demorar parecido com a criação de uma conta. Risco residual aceito: o envio de e-mail ainda pode criar pequenas diferenças de tempo.
+- **Corrida:** dois cadastros iguais no mesmo instante → o `unique` do banco recusa um; o `IntegrityError` é tratado como "e-mail existente".
+- **Carrinho:** como não há login, a sessão fica intacta; o carrinho continua após o cadastro, a verificação e o login (teste ponta a ponta).
+
+## 74. "Esqueci a senha" com as views do Django e link de 1 hora — v2 Etapa 3
+- **Escolha:** `PasswordResetView`, `...DoneView`, `...ConfirmView` e `...CompleteView` do Django, com templates em português, sob `/conta/senha/...`. `PASSWORD_RESET_TIMEOUT = 1 hora` (padrão: 3 dias). `contas/forms.py::ResetForm` só acrescenta o limite de frequência.
+- **O que essas views já garantem:** a resposta é a mesma exista o e-mail ou não (teste); o token do link depende do hash da senha atual, então **vale uma vez só**; a página do link troca o token da URL por um marcador (o token não vaza pelo cabeçalho `Referer`); depois da troca, as outras sessões da conta caem.
+- **Descartado:** escrever as views à mão (mais código e mais chances de erro em algo sensível).
+
+## 75. 2FA obrigatório no admin com django-otp; recuperação pelo servidor — v2 Etapa 3
+- **Escolha:** `LojaAdminSite` (`contas/admin_site.py`) herda o `OTPAdminSite`: o login do admin pede e-mail, senha, **dispositivo** e **código**. Quem não passou pelo 2FA na sessão é tratado como não-staff. A troca do site padrão é feita por `contas/admin_config.py::LojaAdminConfig` (no lugar de `django.contrib.admin` no `INSTALLED_APPS`), então nenhum `admin.py` mudou. O nome continua `admin` (`reverse('admin:...')`).
+- **Dispositivos:** `otp_totp` (app autenticador no celular, código de 6 dígitos que muda a cada 30 s) e `otp_static` (**10 códigos de backup**, cada um de uso único). O `django-otp` exige **escolher o dispositivo** na tela de login: testar o código em todos registraria falhas nos outros. Ele também atrasa cada nova tentativa depois de códigos errados.
+- **Primeiro acesso e recuperação:** como o próprio login do admin exige o código, o celular é cadastrado **no servidor**: `python manage.py configurar_2fa <email>` mostra o QR Code no terminal (é para isso que serve o `qrcode`) e os 10 códigos de backup, uma única vez. Celular perdido: entrar com um código de backup; perdeu também os códigos: quem tem acesso ao servidor roda `configurar_2fa <email> --redefinir`, que apaga e recria tudo. O QR e a URL `otpauth://` contêm a chave secreta e não devem ser fotografados, colados em conversas ou salvos em log.
+- **Só para o admin:** clientes não usam 2FA (decisão 61).
+- **`colorama` no `requirements.txt`:** não foi escolhido por nós; é dependência do `qrcode`, que o declara só para Windows (`colorama ; sys_platform == "win32"`), para o terminal do Windows desenhar o QR Code. Entrou no arquivo pelo `pip freeze`. Em Linux/macOS não é necessário (instalar não faz mal; é uma biblioteca pequena, sem dependências).
+- **Pequena pendência visual:** algumas mensagens da tela de 2FA do `django-otp` aparecem em inglês (ex.: "Please select a device."), porque a tradução da biblioteca não as cobre.
+
+## 76. Grupo "Loja" criado por comando — v2 Etapa 3
+- **Escolha:** `python manage.py criar_grupos` cria (ou atualiza) o grupo **"Loja"** com 17 permissões: produtos, variações e imagens (todas as ações), categorias (só ver), pedidos (ver, editar, apagar; o admin já limita o que pode ser apagado, decisão 46) e itens de pedido (só ver).
+- **Fora do grupo, de propósito:** contas de clientes, grupos e permissões, dispositivos 2FA e registros do axes. Sugestão de uso: a dona trabalha no dia a dia com uma conta `is_staff` do grupo "Loja" (com 2FA), e a superusuária fica para administrar contas e segurança.
+- **Por que comando e não migration:** as permissões do Django só são criadas depois das migrations (sinal `post_migrate`); numa migration de dados elas podem não existir ainda. O comando pode rodar quantas vezes quiser (`get_or_create` + `permissions.set`).

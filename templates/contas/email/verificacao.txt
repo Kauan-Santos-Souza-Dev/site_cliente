@@ -1,0 +1,12 @@
+{% autoescape off %}{# E-mail em texto puro: sem "escape" de HTML, senão o link viraria &amp;. #}Olá, {{ user.first_name }}!
+
+Para confirmar seu e-mail na Elegância Cristã, abra o link abaixo:
+
+{{ link }}
+
+O link vale por 24 horas. Depois de confirmar, você já pode finalizar compras.
+
+Se não foi você que criou esta conta, ignore esta mensagem.
+
+Elegância Cristã
+{% endautoescape %}

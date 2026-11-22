@@ -7,6 +7,7 @@ variáveis de ambiente, que em desenvolvimento são lidas do arquivo ".env"
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -83,7 +84,9 @@ INSTALLED_APPS = [
     'loja',
     'carrinho',
     'pedidos',
-    'django.contrib.admin',
+    # O admin do Django com 2FA obrigatório (contas/admin_config.py). Substitui
+    # 'django.contrib.admin': é o mesmo admin, mas com outro "site" padrão.
+    'contas.admin_config.LojaAdminConfig',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -91,6 +94,15 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Django REST Framework: a API de leitura de produtos (etapa 5).
     'rest_framework',
+    # Bloqueio de tentativas repetidas de login (v2 Etapa 3, decisão 71).
+    'axes',
+    # Autenticação em dois fatores (2FA) do admin (decisão 75):
+    # - django_otp: o núcleo (dispositivos, verificação na sessão);
+    # - otp_totp: códigos de 6 dígitos de um app autenticador no celular;
+    # - otp_static: códigos de backup, cada um usado uma única vez.
+    'django_otp',
+    'django_otp.plugins.otp_totp',
+    'django_otp.plugins.otp_static',
 ]
 
 MIDDLEWARE = [
@@ -100,8 +112,14 @@ MIDDLEWARE = [
     # Proteção CSRF: exige o token em todo formulário POST.
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Depois da autenticação: diz se a usuária já passou pelo 2FA nesta
+    # sessão (request.user.is_verified()). O admin exige isso.
+    'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Por último, como pede a documentação do axes: transforma uma conta
+    # bloqueada na página "Muitas tentativas" (templates/contas/bloqueado.html).
+    'axes.middleware.AxesMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -189,6 +207,62 @@ AUTH_PASSWORD_VALIDATORS = [
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
+
+# Quem confere e-mail e senha no login. A ordem importa: o axes vem primeiro
+# e recusa a tentativa se o par e-mail + IP estiver bloqueado, ANTES de o
+# ModelBackend (o padrão do Django) conferir a senha.
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+# Link de "esqueci a senha" vale 1 hora (o padrão do Django é 3 dias).
+# Quanto menos tempo, menor a chance de um e-mail antigo ser mal usado.
+PASSWORD_RESET_TIMEOUT = 60 * 60
+
+
+# ---------------------------------------------------------------------------
+# Bloqueio de tentativas de login: django-axes (decisão 71)
+# ---------------------------------------------------------------------------
+# Contra força bruta (testar milhares de senhas): 5 erros seguidos bloqueiam
+# o par e-mail + IP por 15 minutos. O axes guarda as tentativas no BANCO,
+# então o bloqueio vale para todos os processos do servidor.
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = timedelta(minutes=15)
+# Lista dentro de lista = combinação: bloqueia "este e-mail vindo deste IP".
+# Assim um atacante não consegue travar a conta de alguém de outro lugar.
+AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]
+# Login certo zera o contador de erros daquele e-mail + IP.
+AXES_RESET_ON_SUCCESS = True
+# Padroniza o e-mail (minúsculas) antes de contar: sem isso, "A@x.com" e
+# "a@x.com" teriam contadores separados e o limite seria burlado.
+AXES_USERNAME_CALLABLE = 'contas.axes.get_axes_username'
+# Página do bloqueio, em português e SEM citar o e-mail (não revela se ele
+# existe: o bloqueio acontece igual para e-mail cadastrado ou não).
+# O axes responde com status 429 ("muitas requisições").
+AXES_LOCKOUT_TEMPLATE = 'contas/bloqueado.html'
+# IP real atrás de proxy (Nginx, Cloudflare): veja o checklist do README.
+
+
+# ---------------------------------------------------------------------------
+# 2FA do admin: django-otp (decisão 75)
+# ---------------------------------------------------------------------------
+# Nome que aparece no app autenticador do celular, ao lado do código.
+OTP_TOTP_ISSUER = 'Elegância Cristã'
+
+
+# ---------------------------------------------------------------------------
+# E-mail (verificação de conta, aviso de cadastro e redefinição de senha)
+# ---------------------------------------------------------------------------
+# Em desenvolvimento, o e-mail é só IMPRESSO no terminal do runserver (backend
+# de console): nada sai para a internet. O envio de verdade (Brevo, por SMTP)
+# será configurado quando houver credenciais (decisão 62).
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend'
+)
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL', 'Elegância Cristã <nao-responder@localhost>'
+)
 
 
 # ---------------------------------------------------------------------------

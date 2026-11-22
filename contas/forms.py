@@ -11,9 +11,11 @@ from django.contrib.auth.forms import (
     AdminUserCreationForm,
     AuthenticationForm,
     BaseUserCreationForm,
+    PasswordResetForm,
     UserChangeForm,
 )
 
+from .emails import can_send_email, mark_email_sent
 from .models import User
 
 
@@ -51,16 +53,18 @@ class SignupForm(BaseUserCreationForm):
         self.fields['password2'].label = 'Confirme a senha'
 
     def clean_email(self):
-        """Padroniza o e-mail e recusa um que já exista (ignorando maiúsculas).
+        """Padroniza o e-mail (sem espaços, em minúsculas)."""
+        return User.objects.normalize_email(self.cleaned_data.get('email'))
 
-        ATENÇÃO (decisão 66): dizer "este e-mail já está cadastrado" revela
-        que a pessoa tem conta na loja. É um risco aceito só até a v2 Etapa 3,
-        quando o cadastro passa a responder sempre "enviamos um e-mail".
+    def validate_unique(self):
+        """NÃO confere se o e-mail já existe (decisão 66, atualizada na v2 Etapa 3).
+
+        Um ModelForm normalmente avisa "já existe usuário com este e-mail",
+        o que revelaria quem tem conta na loja (enumeração). Aqui essa
+        checagem é desligada de propósito: a view `signup` trata o e-mail
+        existente sem contar nada na tela (envia um aviso por e-mail).
+        O banco continua com `unique=True`, então duplicata nunca é gravada.
         """
-        email = User.objects.normalize_email(self.cleaned_data.get('email'))
-        if User.objects.filter(email=email).exists():
-            raise forms.ValidationError('Já existe uma conta com este e-mail.')
-        return email
 
 
 class LoginForm(AuthenticationForm):
@@ -87,6 +91,23 @@ class LoginForm(AuthenticationForm):
         """Só troca o rótulo da senha para português."""
         super().__init__(*args, **kwargs)
         self.fields['password'].label = 'Senha'
+
+
+class ResetForm(PasswordResetForm):
+    """ "Esqueci a senha" com limite de frequência por conta (decisão 74).
+
+    O PasswordResetForm do Django já não revela se o e-mail existe: a
+    página seguinte é a mesma nos dois casos, e o e-mail só é enviado
+    quando há conta. Aqui só acrescentamos o intervalo mínimo entre e-mails
+    (contas/emails.py), contra quem pedisse o reset de outra pessoa sem parar.
+    """
+
+    def get_users(self, email):
+        """Contas que vão receber o link: as do e-mail, fora do intervalo mínimo."""
+        for user in super().get_users(email):
+            if can_send_email(user):
+                mark_email_sent(user)
+                yield user
 
 
 class AdminUserCreateForm(AdminUserCreationForm):

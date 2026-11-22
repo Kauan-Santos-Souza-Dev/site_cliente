@@ -27,8 +27,10 @@
     </form>
 
     <p class="conta__alternativa">
-      Ainda não tem conta?
-      <a href="{% url 'signup' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Cadastre-se</a>
+      <a href="{% url 'password_reset' %}">Esqueci a senha</a>
+    </p>
+    <p class="conta__alternativa">
+      Ainda não tem conta? <a href="{% url 'signup' %}">Cadastre-se</a>
     </p>
   </div>
 </section>

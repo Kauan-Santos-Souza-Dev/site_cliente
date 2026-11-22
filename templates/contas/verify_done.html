@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{# Link de verificação válido (view contas.views.verify_email). #}
+
+{% block title %}E-mail confirmado — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container conta texto-pagina">
+    <h1 class="secao__titulo">E-mail confirmado!</h1>
+    <p>Sua conta está pronta para finalizar compras.</p>
+    {% if user.is_authenticated %}
+      <a class="botao botao--largo" href="{% url 'cart_detail' %}">Ver meu carrinho</a>
+    {% else %}
+      <a class="botao botao--largo" href="{% url 'login' %}">Entrar</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

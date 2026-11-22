@@ -1,0 +1,14 @@
+{% autoescape off %}Olá, {{ user.first_name }}!
+
+Alguém tentou criar uma conta na Elegância Cristã com este e-mail, mas você já tem conta com a gente. Nada foi alterado.
+
+Se foi você, é só entrar:
+{{ login_link }}
+
+Esqueceu a senha? Crie uma nova aqui:
+{{ reset_link }}
+
+Se não foi você, pode ignorar esta mensagem. Sua conta continua segura.
+
+Elegância Cristã
+{% endautoescape %}

@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 
 from carrinho.cart import Cart
+from contas.decorators import verified_email_required
 
 from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
@@ -15,8 +16,13 @@ from .whatsapp import build_whatsapp_url
 LAST_ORDER_SESSION_KEY = 'last_order_id'
 
 
+@verified_email_required
 def checkout(request):
-    """GET: mostra o formulário. POST: cria o pedido e vai para a confirmação."""
+    """GET: mostra o formulário. POST: cria o pedido e vai para a confirmação.
+
+    Só para quem está logada e já confirmou o e-mail (decisão 72). Navegar e
+    montar o carrinho continuam livres para visitantes (decisão 55).
+    """
     cart = Cart(request)
     items = cart.items()
 

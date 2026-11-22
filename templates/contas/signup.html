@@ -23,13 +23,12 @@
       <p class="campo__dica">Use pelo menos 10 caracteres. Evite senhas óbvias ou parecidas com seu nome ou e-mail.</p>
       {% include 'pedidos/_campo.html' with field=form.password2 %}
 
-      <input type="hidden" name="next" value="{{ next }}">
+      <p class="aviso-lgpd">Depois do cadastro, enviamos um link para o seu e-mail. Confirme por ele para poder finalizar compras.</p>
       <button class="botao botao--largo" type="submit">Criar conta</button>
     </form>
 
     <p class="conta__alternativa">
-      Já tem conta?
-      <a href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Entrar</a>
+      Já tem conta? <a href="{% url 'login' %}">Entrar</a>
     </p>
   </div>
 </section>

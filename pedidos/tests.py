@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from contas.test_utils import login_admin, make_customer
 from loja.models import Category, Product, ProductVariant
 
 from .forms import CheckoutForm
@@ -43,6 +44,9 @@ class CheckoutTest(TestCase):
             name='Vestido Teste', slug='vestido-teste', price='150.00',
         )
         self.variant = ProductVariant.objects.create(product=self.product, size='M', stock=5)
+        # O checkout exige conta com e-mail verificado (decisão 72).
+        self.customer = make_customer()
+        self.client.force_login(self.customer)
 
     def add_to_cart(self, quantity=2):
         """Coloca peças no carrinho pelo mesmo formulário da página do produto."""
@@ -159,6 +163,9 @@ class CheckoutSecurityTest(TestCase):
         )
         # Estoque folgado: aqui queremos testar o LIMITE, não a falta de peças.
         self.variant = ProductVariant.objects.create(product=self.product, size='M', stock=50)
+        # O checkout exige conta com e-mail verificado (decisão 72).
+        self.customer = make_customer()
+        self.client.force_login(self.customer)
 
     def add_to_cart(self, client, quantity=1):
         """Coloca peças no carrinho do "navegador" (client) informado."""
@@ -194,6 +201,7 @@ class CheckoutSecurityTest(TestCase):
         self.make_orders(MAX_ORDERS_PER_HOUR)
         # REMOTE_ADDR finge que a requisição veio de outro aparelho.
         other_client = Client(REMOTE_ADDR='10.0.0.2')
+        other_client.force_login(self.customer)
         self.add_to_cart(other_client)
         response = self.checkout(other_client)
         self.assertRedirects(response, reverse('order_confirmation'))
@@ -204,6 +212,7 @@ class CheckoutSecurityTest(TestCase):
         # enforce_csrf_checks=True ele age como em produção: um POST vindo
         # de outro site (sem o token do formulário) recebe 403 Proibido.
         csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.customer)
         response = csrf_client.post(reverse('checkout'), CUSTOMER_DATA)
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Order.objects.exists())
@@ -306,7 +315,8 @@ class OrderAdminTest(TestCase):
         admin_user = get_user_model().objects.create_superuser(
             email='dona@example.com', password='senha-teste-123',
         )
-        self.client.force_login(admin_user)  # entra sem digitar senha (só em testes)
+        # Entra sem digitar senha nem código 2FA (só em testes; ver contas/test_utils.py).
+        login_admin(self.client, admin_user)
         product = Product.objects.create(
             category=Category.objects.get(slug='vestidos'),
             name='Vestido Admin', slug='vestido-admin', price='100.00',
