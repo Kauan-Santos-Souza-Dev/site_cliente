@@ -21,6 +21,10 @@
         {% endif %}
         {# O pagamento online (Pix e cartão) entra nas v2 Etapas 7 e 8. #}
         <p>Pagamento online (Pix e cartão) em breve.</p>
+        <form method="post" action="{% url 'cancel_order' order.pk %}" data-confirmar="Cancelar o pedido nº {{ order.pk }}? As peças voltam para a loja e não dá para desfazer.">
+          {% csrf_token %}
+          <button type="submit" class="botao botao--perigo">Cancelar pedido</button>
+        </form>
       </div>
     {% elif order.status == 'expirado' %}
       <p class="mensagem mensagem--info">O prazo para pagar terminou e as peças voltaram para a loja. Se ainda quiser, é só fazer um novo pedido.</p>
@@ -52,6 +56,7 @@
       CEP {{ order.cep|slice:":5" }}-{{ order.cep|slice:"5:" }}
     </p>
     {% if order.shipped_at %}<p>Enviado em {{ order.shipped_at|date:"d/m/Y" }}.</p>{% endif %}
+    {% if order.delivered_at %}<p>Entregue em {{ order.delivered_at|date:"d/m/Y" }}.</p>{% endif %}
 
     {# target="_blank" abre em nova aba; rel="noopener" impede a nova aba de controlar esta. #}
     <p><a class="botao botao--whatsapp" href="{{ whatsapp_url }}" target="_blank" rel="noopener">Falar com a loja sobre este pedido</a></p>

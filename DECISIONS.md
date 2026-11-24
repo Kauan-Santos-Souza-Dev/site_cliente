@@ -19,6 +19,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 3 | Segurança da conta | 70 a 76 (e atualiza 65, 66 e 69) |
 | v2 · 4 | LGPD: aceite, Minha conta, retenção, textos legais, cookies | 77 a 85 (e reescreve 69) |
 | v2 · 5 | Pedido ligado à conta, status, reserva de estoque, frete, Meus pedidos | 86 a 94 (e atualiza 44, 46, 78 e 80) |
+| v2 · 5b | Status "entregue", cancelamento pela cliente, devolução manual de estoque | 95 a 97 (e atualiza 87 e 92) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -590,3 +591,44 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Pula (e diz por quê):** contas da equipe (`is_staff`/`is_superuser`), contas já anonimizadas e contas com pedido ativo (decisão 92).
 - **Permissão:** `permissions=['change']`. Só quem edita contas (a superusuária) vê a ação; o grupo "Loja" recebe 403. Testado.
 - **Atenção à dona:** antes de anonimizar a pedido de alguém por e-mail ou WhatsApp, confirmar que o pedido veio **do e-mail da conta**. Senão, qualquer pessoa poderia pedir a exclusão da conta de outra.
+
+## 95. Status "entregue"; o prazo de pedido ativo conta da entrega — v2 Etapa 5b
+- **Escolha:** novo status `entregue` (`Order.Status.DELIVERED`) e campo `delivered_at`, preenchido no `save()` como o `shipped_at`. Ação "Marcar como entregue (só pedidos enviados)" no admin. **Atualiza a decisão 87.**
+- **Tabela final de transições:**
+
+| De \ Para | pago | expirado | cancelado | enviado | entregue | estornado |
+|---|---|---|---|---|---|---|
+| aguardando pagamento | sim | sim | sim | | | |
+| pago | | | | sim | | sim |
+| enviado | | | | | sim | sim |
+| entregue | | | | | | sim |
+| expirado, cancelado, estornado | finais | | | | | |
+
+  Não existe "pago → entregue": a peça passa por "enviado". "Entregue → estornado" cobre a desistência do CDC (art. 49), que corre do **recebimento**.
+- **Pedido ativo (atualiza a decisão 92):** aguardando, pago, **enviado (sem limite de tempo)** ou **entregue há menos de 30 dias** (`DELIVERED_ACTIVE_PERIOD`, antes `SHIPPED_ACTIVE_PERIOD`). Os 30 dias foram **aprovados como padrão pelo Kauan**; a dona pode mudar (constante em `pedidos/models.py`).
+- **Consequência aceita:** um pedido "enviado" que a dona esquecer de marcar como entregue bloqueia a exclusão da conta indefinidamente. Preferimos bloquear a anonimizar uma conta com entrega pendente. O filtro por status do admin ajuda a achar esses pedidos.
+- **Migração:** pedidos já "enviados" ficam com `delivered_at` vazio e continuam ativos (lado seguro). Sem migration de dados.
+- **Política de Privacidade:** a frase da exclusão passou a falar em "entrega", e `PRIVACY_POLICY_VERSION` subiu para `2026-11-22.3`.
+- **PENDÊNCIA DE PRODUÇÃO (antes de ter clientes reais): não existe reaceite.** O aceite grava a versão da Política **só no cadastro** (`contas/views.py`, model `Consent`). Subir a versão **não** afeta as contas existentes: elas continuam com a versão antiga gravada, não veem aviso e não são chamadas a aceitar a nova. Hoje isso é inofensivo (não há clientes reais, e a mudança só detalha uma regra). Mas, quando houver clientes, uma mudança **material** na Política exigirá avisar e/ou pedir novo aceite (LGPD art. 8º, §6º). Não implementado agora, de propósito.
+
+## 96. A cliente cancela sozinha o pedido aguardando pagamento — v2 Etapa 5b
+- **Escolha:** `POST /pedido/meus-pedidos/<id>/cancelar/` (`pedidos/views.py::cancel_order`), com botão em "Meus pedidos" e no detalhe, e confirmação por `data-confirmar` (JavaScript, melhora progressiva).
+- **Segurança:**
+  - Só POST (`@require_POST`; GET dá 405) e CSRF do Django: um link ou robô não cancela nada.
+  - `@login_required`, e a busca parte de `request.user.orders`: pedido de outra conta, sem dona ou inexistente dá 404 (contra IDOR, como na decisão 91).
+  - Só cancela se o status é "aguardando pagamento".
+- **Concorrência:** `reservations.py::cancel_order_by_customer` tem o mesmo molde de `expire_order`: `transaction.atomic()` + `select_for_update()` na linha do pedido, relendo o status dentro da trava. Cancelar, expirar e (Etapa 7) pagar ao mesmo tempo: o segundo a chegar não acha um pedido "aguardando" e não faz nada. O estoque volta uma só vez, pelo `Order.save()`.
+- **Antes de cancelar**, a view expira os pedidos vencidos da conta, para a mensagem ficar certa.
+- **Pendência para a Etapa 7:** se já existir um Pix gerado, o cancelamento deve também cancelar a cobrança no Mercado Pago, e um pagamento que chegue depois para pedido cancelado vira estorno.
+- **Aprovado como padrão** pelo Kauan; a dona pode mudar.
+- **Descartado:** cancelar por GET (inseguro); botão sem confirmação (clique acidental sem volta: a cliente teria de refazer o pedido).
+
+## 97. Estorno de peça já enviada: estoque volta só por ação manual da dona — v2 Etapa 5b
+- **Escolha:** `enviado → estornado` e `entregue → estornado` continuam **sem** devolver estoque sozinhos (decisão 87). Nova ação do admin **"Devolver peças ao estoque"**, para a dona usar depois de receber a peça de volta e conferir. **Atualiza a decisão 87.**
+- **Registro:** campo `Order.stock_restored_at` (preenchido por qualquer devolução, automática ou manual) e uma entrada no **histórico do pedido** do admin (`log_change`: quem, quando e o quê).
+- **Trava:** `Order.restore_stock_manually()` roda em `transaction.atomic()`, trava o pedido com `select_for_update()` e confere de novo: estornado, já foi enviado (`shipped_at`) e `stock_restored_at` vazio. Clique duplo, ou duas pessoas ao mesmo tempo, não devolvem em dobro. Pedido estornado quando estava só "pago" não é elegível (o estoque já voltou sozinho).
+- **Limitação (pergunta à dona):** a ação devolve **todas** as peças do pedido. **Devolução parcial** (só uma das peças) ainda não existe: hoje a dona teria de ajustar o estoque à mão na variação. Precisamos saber se isso acontece na loja.
+- **Devolução parcial — decisão da dona:** por enquanto é **ajuste manual do estoque** na variação (admin → produto), sem ação própria. Se acontecer com frequência, vira uma ação por item numa etapa futura.
+- **O que os testes NÃO provam:** rodam no MySQL (`test_elegancia_crista`), mas as requisições vão uma depois da outra, na mesma conexão e na transação do `TestCase`; ali o `select_for_update()` nunca espera ninguém. Provam a lógica (clique duplo, status já mudado), não a corrida real de duas requisições simultâneas. Isso vale para as decisões 88, 96 e 97 (a de 88 tem teste de "corrida" simulada, não de concorrência real).
+- **Permissão:** sem model novo, então o grupo "Loja" (que edita pedidos) já pode usar a ação.
+- **Descartado:** devolver o estoque no momento do estorno (a peça ainda está com a cliente e poderia ser vendida de novo sem existir na loja); campo de texto livre para a dona "registrar" (o histórico do admin já grava quem e quando).

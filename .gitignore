@@ -1,6 +1,9 @@
 # Segredos: nunca versionar
 .env
 
+# Backups do banco (contêm dados pessoais)
+*.sql
+
 # Fotos enviadas pelo admin
 media/
 

@@ -536,16 +536,51 @@ GET /pedido/meus-pedidos/7/ → pedidos/urls.py → views.order_detail (@login_r
   minutos de reserva). **Os valores atuais são PROVISÓRIOS** (exemplos por região, grátis a partir de R$ 299,00);
   o admin avisa enquanto houver algum. No checkout, com JavaScript, frete e total aparecem ao escolher a UF
   (`ativarFreteCheckout`, em `static/js/main.js`, somando em centavos); sem JavaScript, há a tabela num "Ver tabela de frete".
-- **Admin → Pedidos:** status só leitura; ações "Marcar como enviado (só pedidos pagos)" e "Cancelar (só aguardando
-  pagamento; devolve o estoque)". Não existe "marcar como pago": só o gateway confirma pagamento. Só apaga pedido
+- **Admin → Pedidos:** status só leitura; ações "Marcar como enviado (só pedidos pagos)", "Marcar como entregue (só
+  enviados)", "Cancelar (só aguardando pagamento; devolve o estoque)" e "Devolver peças ao estoque" (etapa 5b). Não existe "marcar como pago": só o gateway confirma pagamento. Só apaga pedido
   cancelado ou expirado. Busca também pelo e-mail da conta.
 - **Pedidos da v1** (sem conta): migrados para "aguardando pagamento", **sem prazo** (não expiram sozinhos). Ficam só
   no admin; a dona decide cancelar ou não.
-- **Excluir a conta com pedido ativo** (aguardando pagamento, pago ou enviado há menos de 30 dias): a página explica
+- **Excluir a conta com pedido ativo** (aguardando pagamento, pago, enviado ou entregue há menos de 30 dias, etapa 5b): a página explica
   e não mostra o formulário. **Admin → Usuários → ação "Anonimizar contas selecionadas"** (só a superusuária): pede
   confirmação, pula equipe, contas já anonimizadas e contas com pedido ativo. Antes de usar a pedido de alguém,
   confira que o pedido veio do e-mail da conta.
 - **Exportação de dados** (Minha conta) inclui os pedidos da conta.
+
+### Entregue, cancelamento pela cliente e estoque manual (app `pedidos/`) — v2 etapa 5b
+| Endereço | View | O que faz |
+|---|---|---|
+| `/pedido/meus-pedidos/<id>/cancelar/` | `cancel_order` | **Só POST.** Cancela pedido da conta logada que aguarda pagamento e devolve o estoque |
+
+**Status e transições finais** (`Order.ALLOWED_TRANSITIONS`, decisão 95):
+
+| De \ Para | pago | expirado | cancelado | enviado | entregue | estornado |
+|---|---|---|---|---|---|---|
+| **aguardando pagamento** | gateway (Etapas 7/8) | prazo vencido | admin ou a própria cliente | — | — | — |
+| **pago** | — | — | — | admin | — | estorno (Etapa 8) |
+| **enviado** | — | — | — | — | admin | estorno (Etapa 8) |
+| **entregue** | — | — | — | — | — | estorno (Etapa 8) |
+| **expirado, cancelado, estornado** | finais | | | | | |
+
+- O estoque volta sozinho em: aguardando → expirado, aguardando → cancelado e pago → estornado.
+- Estorno de pedido **enviado ou entregue** não devolve estoque sozinho: no admin, ação **"Devolver peças ao estoque"**
+  (só para estornado que já foi enviado), usada pela dona depois de conferir a peça. Fica no histórico do pedido
+  (quem e quando), em `stock_restored_at`, e não se repete (decisão 97). Devolve todas as peças do pedido.
+- **Pedido ativo** (bloqueia a exclusão da conta): aguardando, pago, enviado (sem limite) ou entregue há menos de 30 dias
+  (a contar da **entrega**). Se a dona esquecer de marcar "entregue", o pedido segue bloqueando a exclusão.
+
+**Caminho do cancelamento pela cliente:**
+```
+POST /pedido/meus-pedidos/7/cancelar/ → config/urls.py → pedidos/urls.py → pedidos/views.py::cancel_order
+  (@login_required, @require_POST, CSRF)
+  → expire_overdue_orders(user)                      se o prazo venceu, vira "expirado" (e não "cancelado")
+  → get_object_or_404(request.user.orders, pk=7)     pedido de outra conta = 404
+  → reservations.cancel_order_by_customer(user, 7), em transaction.atomic():
+       Order.select_for_update() + confere DE NOVO aguardando e da conta
+          não está mais? → False ("não pode mais ser cancelado")
+          está → status = cancelado → Order.save() → restore_stock(): F('stock') + qtd
+  → messages + redirect /pedido/meus-pedidos/ → templates/pedidos/my_orders.html
+```
 
 ## Dados pessoais que o site guarda (LGPD)
 Inventário real, por tabela e campo. A Política de Privacidade e a exclusão de conta se baseiam nele:
@@ -576,7 +611,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 |---|---|
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
-| `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única) |
+| `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97) |
 | `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança
@@ -668,10 +703,10 @@ Decisões de negócio que só a dona pode tomar (algumas com orientação juríd
 8. Valor dos **juros do parcelamento** (perguntar na v2 Etapa 6).
 9. **Frete (v2 Etapa 5):** valor real por estado (ou região), valor a partir do qual o frete é grátis e se a loja entrega
    nos 27 estados. Hoje: valores PROVISÓRIOS.
-10. **Estorno de pedido já enviado:** a peça volta ao estoque só depois de chegar e ser conferida (como está) ou na hora do estorno?
-11. **Exclusão de conta:** bloquear por 30 dias depois do envio está bom?
-12. A cliente pode **cancelar sozinha** um pedido aguardando pagamento? (Hoje não: ele expira em 30 minutos, ou ela fala com a loja.)
-13. Precisa de um status **"entregue"**? Hoje o fluxo termina em "enviado".
+10. **Estorno de pedido já enviado:** a peça volta ao estoque só depois de chegar e ser conferida, pela ação do admin (etapa 5b). Confirmar com a dona. **Devolução parcial** (só uma das peças): por enquanto é ajuste manual do estoque (definido pelo Kauan); a ação devolve todas as peças.
+11. **Exclusão de conta:** bloquear por 30 dias depois da **entrega** (etapa 5b) está aprovado como padrão (a dona pode mudar). Quem marca "entregue" é a dona, no admin.
+12. ~~Cancelamento pela cliente~~ e ~~status "entregue"~~: feitos na etapa 5b. Aprovados como padrão; a dona pode mudar.
+13. **Antes de ter clientes reais:** a Política não tem reaceite (decisão 95). Decidir como avisar as clientes quando o texto mudar.
 
 ## Roteiro da v2
 O escopo e as etapas da v2 estão no [CLAUDE.md](CLAUDE.md#etapas-do-roteiro-da-v2). Cada etapa concluída ganha

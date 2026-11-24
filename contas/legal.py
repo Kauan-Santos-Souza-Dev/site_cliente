@@ -21,7 +21,8 @@ from datetime import timedelta
 # --- Versões dos textos ---------------------------------------------------
 # .2 (v2 Etapa 5): pedido ligado à conta, exportação com pedidos, exclusão
 # bloqueada com pedido em andamento.
-PRIVACY_POLICY_VERSION = '2026-11-22.2'
+# .3 (v2 Etapa 5b): o prazo de "pedido em andamento" passa a contar da ENTREGA.
+PRIVACY_POLICY_VERSION = '2026-11-22.3'
 TERMS_VERSION = '2026-11-22'
 
 # --- Prazos de retenção ---------------------------------------------------

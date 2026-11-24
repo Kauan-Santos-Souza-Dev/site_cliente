@@ -10,7 +10,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 
 from contas import legal
-from pedidos.models import SHIPPED_ACTIVE_PERIOD
+from pedidos.models import DELIVERED_ACTIVE_PERIOD
 from pedidos.reservations import expire_overdue_orders
 
 from .models import Category, Product
@@ -124,5 +124,5 @@ def legal_context():
         'order_retention_years': legal.ORDER_RETENTION.days // 365,
         'unverified_days': legal.UNVERIFIED_ACCOUNT_RETENTION.days,
         'login_attempt_days': legal.LOGIN_ATTEMPT_RETENTION.days,
-        'shipped_active_days': SHIPPED_ACTIVE_PERIOD.days,
+        'delivered_active_days': DELIVERED_ACTIVE_PERIOD.days,
     }

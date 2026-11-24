@@ -11,6 +11,7 @@ from decimal import Decimal
 from urllib.parse import unquote
 
 from django.conf import settings
+from django.contrib.admin.models import LogEntry
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -23,7 +24,7 @@ from loja.models import StoreSettings
 
 from .models import Order, OrderItem, ShippingRate, active_orders
 from .rate_limit import MAX_ORDERS_PER_HOUR
-from .reservations import expire_order, expire_overdue_orders
+from .reservations import cancel_order_by_customer, expire_order, expire_overdue_orders
 from .shipping import ShippingUnavailableError, calculate_shipping
 from .whatsapp import build_whatsapp_url, format_brl
 
@@ -313,7 +314,8 @@ class OrderTransitionTest(TestCase):
         allowed = {
             (S.AWAITING_PAYMENT, S.PAID), (S.AWAITING_PAYMENT, S.EXPIRED),
             (S.AWAITING_PAYMENT, S.CANCELLED), (S.PAID, S.SHIPPED),
-            (S.PAID, S.REFUNDED), (S.SHIPPED, S.REFUNDED),
+            (S.PAID, S.REFUNDED), (S.SHIPPED, S.DELIVERED),
+            (S.SHIPPED, S.REFUNDED), (S.DELIVERED, S.REFUNDED),
         }
         for old in S.values:
             for new in S.values:
@@ -347,7 +349,8 @@ class OrderTransitionTest(TestCase):
                 self.assertEqual(self.variant.stock, before + 2)
 
     def test_nao_devolve_estoque_ao_pagar_enviar_ou_estornar_enviado(self):
-        for old, new in [(S.AWAITING_PAYMENT, S.PAID), (S.PAID, S.SHIPPED), (S.SHIPPED, S.REFUNDED)]:
+        for old, new in [(S.AWAITING_PAYMENT, S.PAID), (S.PAID, S.SHIPPED), (S.SHIPPED, S.DELIVERED),
+                         (S.SHIPPED, S.REFUNDED), (S.DELIVERED, S.REFUNDED)]:
             with self.subTest(de=old, para=new):
                 self.variant.refresh_from_db()
                 before = self.variant.stock
@@ -365,6 +368,11 @@ class OrderTransitionTest(TestCase):
         order = self.order_with(S.PAID)
         self.change(order, S.SHIPPED)
         self.assertIsNotNone(Order.objects.get(pk=order.pk).shipped_at)
+
+    def test_entregue_grava_a_data_de_entrega(self):
+        order = self.order_with(S.SHIPPED)
+        self.change(order, S.DELIVERED)
+        self.assertIsNotNone(Order.objects.get(pk=order.pk).delivered_at)
 
     def test_variacao_apagada_nao_quebra_o_cancelamento(self):
         """O item fica no histórico (SET_NULL) e o cancelamento funciona."""
@@ -510,6 +518,99 @@ class MyOrdersTest(TestCase):
         self.assertContains(response, f'https://wa.me/{settings.WHATSAPP_NUMBER}?text=')
 
 
+class CustomerCancelTest(TestCase):
+    """A cliente cancela o próprio pedido aguardando pagamento (decisão 96).
+
+    Atenção: os testes rodam no MySQL (banco temporário test_elegancia_crista),
+    mas as requisições vão UMA DEPOIS DA OUTRA, na mesma conexão e dentro da
+    transação do TestCase. Provam a lógica (clique duplo, status já mudado),
+    mas NÃO provam a concorrência real de duas requisições simultâneas: um
+    select_for_update() na mesma conexão nunca espera ninguém. A garantia
+    contra devolução em dobro vem da trava do MySQL e só se confirma com duas
+    conexões ao mesmo tempo (TransactionTestCase com threads, ou carga real).
+    """
+
+    def setUp(self):
+        self.variant = make_variant(price='150.00', stock=3)
+        self.maria = make_customer()
+        self.other = make_customer(email='outra@example.com')
+        self.order = make_order(user=self.maria, variant=self.variant, quantity=2)
+        self.client.force_login(self.maria)
+
+    def cancel(self, order):
+        return self.client.post(reverse('cancel_order', args=[order.pk]))
+
+    def test_cancela_e_devolve_o_estoque(self):
+        response = self.cancel(self.order)
+        self.assertRedirects(response, reverse('my_orders'))
+        self.order.refresh_from_db()
+        self.variant.refresh_from_db()
+        self.assertEqual(self.order.status, S.CANCELLED)
+        self.assertEqual(self.variant.stock, 5)  # 3 + 2 devolvidas
+
+    def test_so_aceita_post(self):
+        response = self.client.get(reverse('cancel_order', args=[self.order.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, S.AWAITING_PAYMENT)
+
+    def test_exige_login(self):
+        self.client.logout()
+        response = self.cancel(self.order)
+        self.assertEqual(response.status_code, 302)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, S.AWAITING_PAYMENT)
+
+    def test_pedido_de_outra_conta_ou_sem_dona_da_404_e_nao_muda(self):
+        others = [make_order(user=self.other, variant=self.variant),
+                  make_order(user=None, variant=self.variant)]
+        for order in others:
+            with self.subTest(pedido=order.pk):
+                self.assertEqual(self.cancel(order).status_code, 404)
+                order.refresh_from_db()
+                self.assertEqual(order.status, S.AWAITING_PAYMENT)
+        self.assertEqual(self.client.post(reverse('cancel_order', args=[999999])).status_code, 404)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 3)
+
+    def test_nao_cancela_pedido_que_nao_esta_aguardando(self):
+        for status in (S.PAID, S.SHIPPED, S.DELIVERED, S.EXPIRED, S.REFUNDED):
+            with self.subTest(status=status):
+                order = make_order(user=self.maria, status=status, variant=self.variant)
+                response = self.client.post(reverse('cancel_order', args=[order.pk]), follow=True)
+                self.assertContains(response, 'não pode mais ser cancelado')
+                order.refresh_from_db()
+                self.assertEqual(order.status, status)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 3)
+
+    def test_clique_duplo_nao_devolve_estoque_em_dobro(self):
+        self.cancel(self.order)
+        self.cancel(self.order)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 5)
+
+    def test_pedido_vencido_vira_expirado_e_nao_cancelado(self):
+        Order.objects.filter(pk=self.order.pk).update(expires_at=timezone.now() - timedelta(minutes=1))
+        self.cancel(self.order)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, S.EXPIRED)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 5)  # devolvido uma vez só
+
+    def test_servico_filtra_pela_dona(self):
+        self.assertFalse(cancel_order_by_customer(self.other, self.order.pk))
+        self.assertTrue(cancel_order_by_customer(self.maria, self.order.pk))
+
+    def test_botao_so_aparece_em_pedido_aguardando(self):
+        paid = make_order(user=self.maria, status=S.PAID, variant=self.variant)
+        page = self.client.get(reverse('my_orders'))
+        self.assertContains(page, reverse('cancel_order', args=[self.order.pk]))
+        self.assertNotContains(page, reverse('cancel_order', args=[paid.pk]))
+        detail = self.client.get(reverse('order_detail', args=[paid.pk]))
+        self.assertNotContains(detail, 'Cancelar pedido')
+
+
 class ActiveOrdersTest(TestCase):
     """Definição de pedido "ativo" (decisão 92), usada para bloquear a exclusão da conta."""
 
@@ -517,9 +618,13 @@ class ActiveOrdersTest(TestCase):
         self.variant = make_variant(stock=10)
         self.user = make_customer()
 
-    def is_active(self, status, shipped_days_ago=None):
+    def is_active(self, status, shipped_days_ago=None, delivered_days_ago=None):
         """Cria um pedido e diz se ele conta como ativo."""
         order = make_order(user=self.user, status=status, variant=self.variant)
+        if delivered_days_ago is not None:
+            Order.objects.filter(pk=order.pk).update(
+                delivered_at=timezone.now() - timedelta(days=delivered_days_ago)
+            )
         if shipped_days_ago is not None:
             Order.objects.filter(pk=order.pk).update(
                 shipped_at=timezone.now() - timedelta(days=shipped_days_ago)
@@ -533,12 +638,16 @@ class ActiveOrdersTest(TestCase):
         self.assertTrue(self.is_active(S.AWAITING_PAYMENT))
         self.assertTrue(self.is_active(S.PAID))
         self.assertTrue(self.is_active(S.SHIPPED, shipped_days_ago=5))
+        # Enviado conta como ativo SEM limite: só "entregue" encerra (decisão 95).
+        self.assertTrue(self.is_active(S.SHIPPED, shipped_days_ago=90))
+        self.assertTrue(self.is_active(S.DELIVERED, delivered_days_ago=5))
 
     def test_nao_ativos(self):
         self.assertFalse(self.is_active(S.EXPIRED))
         self.assertFalse(self.is_active(S.CANCELLED))
         self.assertFalse(self.is_active(S.REFUNDED))
-        self.assertFalse(self.is_active(S.SHIPPED, shipped_days_ago=31))
+        # O prazo de 30 dias conta da ENTREGA, não do envio.
+        self.assertFalse(self.is_active(S.DELIVERED, delivered_days_ago=31, shipped_days_ago=40))
 
 
 class WhatsAppTest(TestCase):
@@ -593,7 +702,10 @@ class OrderAdminTest(TestCase):
         self.assertNotContains(response, 'name="status"')
         changelist = self.client.get(reverse('admin:pedidos_order_changelist'))
         actions = {name for name, _label in changelist.context['action_form'].fields['action'].choices}
-        self.assertEqual(actions - {''}, {'mark_shipped', 'cancel_orders'})
+        self.assertEqual(
+            actions - {''},
+            {'mark_shipped', 'mark_delivered', 'cancel_orders', 'restore_stock_action'},
+        )
 
     def test_acao_cancelar_devolve_estoque_e_pula_pago(self):
         awaiting = make_order(variant=self.variant)
@@ -616,8 +728,56 @@ class OrderAdminTest(TestCase):
         self.assertEqual(awaiting.status, S.AWAITING_PAYMENT)
         self.assertEqual(paid.status, S.SHIPPED)
 
+    def test_acao_entregar_so_de_enviado(self):
+        paid = make_order(status=S.PAID, variant=self.variant)
+        shipped = make_order(status=S.SHIPPED, variant=self.variant)
+        self.run_action('mark_delivered', paid, shipped)
+        paid.refresh_from_db()
+        shipped.refresh_from_db()
+        self.assertEqual(paid.status, S.PAID)
+        self.assertEqual(shipped.status, S.DELIVERED)
+        self.assertIsNotNone(shipped.delivered_at)
+
+    def test_devolver_estoque_manual_so_de_estorno_de_enviado_e_uma_vez(self):
+        """Estoque 0; o pedido tem 1 peça. Só o estornado-que-foi-enviado é elegível."""
+        for status in (S.SHIPPED, S.DELIVERED):
+            with self.subTest(origem=status):
+                self.variant.stock = 0
+                self.variant.save()
+                order = make_order(status=status, variant=self.variant)
+                Order.objects.filter(pk=order.pk).update(shipped_at=timezone.now())
+                order.refresh_from_db()
+                order.status = S.REFUNDED
+                order.save()
+                self.variant.refresh_from_db()
+                self.assertEqual(self.variant.stock, 0)  # o estorno não devolve sozinho
+                order.refresh_from_db()
+                self.assertIsNone(order.stock_restored_at)
+                # 1ª execução devolve; a 2ª e a 3ª não duplicam.
+                for _ in range(3):
+                    self.run_action('restore_stock_action', order)
+                self.variant.refresh_from_db()
+                order.refresh_from_db()
+                self.assertEqual(self.variant.stock, 1)
+                self.assertIsNotNone(order.stock_restored_at)
+                # Quem e quando ficam no histórico do pedido.
+                self.assertEqual(LogEntry.objects.filter(
+                    object_id=str(order.pk), change_message__contains='Estoque devolvido manualmente',
+                ).count(), 1)
+
+    def test_devolver_estoque_manual_pula_pedidos_nao_elegiveis(self):
+        paid = make_order(status=S.PAID, variant=self.variant)
+        shipped = make_order(status=S.SHIPPED, variant=self.variant)
+        refunded_paid = make_order(status=S.PAID, variant=self.variant)
+        refunded_paid.status = S.REFUNDED
+        refunded_paid.save()  # pago -> estornado: o estoque já voltou sozinho (stock 1)
+        response = self.run_action('restore_stock_action', paid, shipped, refunded_paid)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 1)  # nada foi devolvido de novo
+        self.assertContains(response, '3 pedido(s) pulado(s)')
+
     def test_so_apaga_pedido_cancelado_ou_expirado(self):
-        for status, expected in [(S.AWAITING_PAYMENT, 403), (S.PAID, 403), (S.SHIPPED, 403),
+        for status, expected in [(S.AWAITING_PAYMENT, 403), (S.PAID, 403), (S.SHIPPED, 403), (S.DELIVERED, 403),
                                  (S.CANCELLED, 200), (S.EXPIRED, 200)]:
             with self.subTest(status=status):
                 order = make_order(status=status, variant=self.variant)

@@ -249,6 +249,21 @@ function ativarFreteCheckout() {
   atualizar(); // o formulário pode voltar com a UF já escolhida (erro em outro campo)
 }
 
+/**
+ * Confirmação antes de ações sem volta (ex.: cancelar pedido).
+ *
+ * Formulários com data-confirmar="texto" pedem confirmação ao enviar.
+ * Melhora progressiva: sem JavaScript o formulário envia direto, e o servidor
+ * continua validando tudo (dono do pedido, status, CSRF).
+ */
+function ativarConfirmacaoDeFormularios() {
+  document.querySelectorAll('form[data-confirmar]').forEach((formulario) => {
+    formulario.addEventListener('submit', (evento) => {
+      if (!window.confirm(formulario.dataset.confirmar)) evento.preventDefault();
+    });
+  });
+}
+
 ativarMenuMobile();
 ativarCabecalhoInteligente();
 ativarRevelacaoNoScroll();
@@ -256,3 +271,4 @@ ativarParallax();
 ativarGaleriaProduto();
 ativarAvisoCookies();
 ativarFreteCheckout();
+ativarConfirmacaoDeFormularios();

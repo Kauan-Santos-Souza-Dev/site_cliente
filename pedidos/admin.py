@@ -28,7 +28,9 @@ class OrderAdmin(admin.ModelAdmin):
     """Lista de pedidos com busca, filtros e AÇÕES para mudar o status.
 
     O status é SÓ LEITURA (decisão 87). Ele muda por ações que respeitam a
-    tabela de transições do model: "Marcar como enviado" e "Cancelar".
+    tabela de transições do model: "Marcar como enviado", "Marcar como
+    entregue" e "Cancelar". A ação "Devolver peças ao estoque" (decisão 97)
+    não muda o status: só devolve o estoque de um estorno de peça enviada.
     Não existe "marcar como pago": quem confirma pagamento é o gateway
     (Etapas 7 e 8). Assim nenhum clique por engano vira "pago".
     """
@@ -43,14 +45,16 @@ class OrderAdmin(admin.ModelAdmin):
     # lateral por data acima funciona sem isso. Ver DECISIONS.md.
     readonly_fields = (
         'user', 'status', 'shipping_cost', 'total_display',
-        'expires_at', 'shipped_at', 'created_at', 'updated_at',
+        'expires_at', 'shipped_at', 'delivered_at', 'stock_restored_at',
+        'created_at', 'updated_at',
     )
     inlines = [OrderItemInline]
-    actions = ['mark_shipped', 'cancel_orders']
+    actions = ['mark_shipped', 'mark_delivered', 'cancel_orders', 'restore_stock_action']
     fieldsets = (
         ('Pedido', {'fields': (
             'user', 'status', 'shipping_cost', 'total_display',
-            'expires_at', 'shipped_at', 'created_at', 'updated_at',
+            'expires_at', 'shipped_at', 'delivered_at', 'stock_restored_at',
+            'created_at', 'updated_at',
         )}),
         ('Entrega', {'fields': (
             'customer_name', 'phone', 'cep', 'street', 'number',
@@ -119,6 +123,34 @@ class OrderAdmin(admin.ModelAdmin):
     @admin.action(description='Marcar como enviado (só pedidos pagos)')
     def mark_shipped(self, request, queryset):
         self.change_status(request, queryset, Order.Status.SHIPPED)
+
+    @admin.action(description='Marcar como entregue (só pedidos enviados)')
+    def mark_delivered(self, request, queryset):
+        self.change_status(request, queryset, Order.Status.DELIVERED)
+
+    @admin.action(description='Devolver peças ao estoque (só estorno de pedido enviado, com a peça já conferida)')
+    def restore_stock_action(self, request, queryset):
+        """Devolve o estoque de estornos de peças que já tinham sido enviadas.
+
+        A dona só deve usar depois de RECEBER a peça de volta e conferir que
+        está em bom estado. Cada devolução fica no histórico do pedido (quem e
+        quando) e em stock_restored_at, e não se repete (decisão 97).
+        """
+        restored = skipped = 0
+        for order in queryset:
+            if order.restore_stock_manually():
+                self.log_change(request, order, 'Estoque devolvido manualmente após conferir a peça.')
+                restored += 1
+            else:
+                skipped += 1
+        self.message_user(request, f'Estoque devolvido em {restored} pedido(s).', messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                f'{skipped} pedido(s) pulado(s): só vale para pedido estornado que tinha sido '
+                'enviado e ainda não teve o estoque devolvido.',
+                messages.WARNING,
+            )
 
     @admin.action(description='Cancelar (só aguardando pagamento; devolve o estoque)')
     def cancel_orders(self, request, queryset):

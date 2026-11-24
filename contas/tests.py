@@ -1127,19 +1127,33 @@ class DeleteAccountWithOrdersTest(TestCase):
         self.assertIsNone(self.user.anonymized_at)
 
     def test_pedido_pago_e_enviado_recente_tambem_bloqueiam(self):
-        for status in (Order.Status.PAID, Order.Status.SHIPPED):
+        for status in (Order.Status.PAID, Order.Status.SHIPPED, Order.Status.DELIVERED):
             with self.subTest(status=status):
                 order = make_order(user=self.user, status=status, variant=self.variant)
-                Order.objects.filter(pk=order.pk).update(shipped_at=timezone.now())
+                # Entregue há pouco: o prazo de 30 dias conta da ENTREGA (decisão 95).
+                Order.objects.filter(pk=order.pk).update(
+                    shipped_at=timezone.now(), delivered_at=timezone.now()
+                )
                 self.delete()
                 self.user.refresh_from_db()
                 self.assertIsNone(self.user.anonymized_at)
                 Order.objects.filter(pk=order.pk).update(status=Order.Status.EXPIRED)
 
+    def test_enviado_nao_entregue_bloqueia_mesmo_depois_de_30_dias(self):
+        order = make_order(user=self.user, status=Order.Status.SHIPPED, variant=self.variant)
+        Order.objects.filter(pk=order.pk).update(shipped_at=timezone.now() - timedelta(days=60))
+        self.delete()
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.anonymized_at)
+
     def test_pedidos_encerrados_nao_bloqueiam_e_ficam_guardados(self):
         expired = make_order(user=self.user, status=Order.Status.EXPIRED, variant=self.variant)
-        shipped = make_order(user=self.user, status=Order.Status.SHIPPED, variant=self.variant)
-        Order.objects.filter(pk=shipped.pk).update(shipped_at=timezone.now() - timedelta(days=60))
+        shipped = make_order(user=self.user, status=Order.Status.DELIVERED, variant=self.variant)
+        # Enviado há 65 dias, entregue há 60: vale a data da entrega.
+        Order.objects.filter(pk=shipped.pk).update(
+            shipped_at=timezone.now() - timedelta(days=65),
+            delivered_at=timezone.now() - timedelta(days=60),
+        )
         response = self.delete()
         self.assertRedirects(response, reverse('account_deleted'))
         self.user.refresh_from_db()

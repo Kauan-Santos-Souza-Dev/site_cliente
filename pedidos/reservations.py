@@ -60,6 +60,31 @@ def expire_order(order_id, now):
         return True
 
 
+def cancel_order_by_customer(user, order_id):
+    """A cliente cancela o PRÓPRIO pedido aguardando pagamento. Devolve True se cancelou.
+
+    Mesma técnica de expire_order: select_for_update() trava a linha, então
+    "cancelar" e "expirar" (ou, na Etapa 7, "pagar") ao mesmo tempo nunca
+    devolvem o estoque duas vezes: quem chega depois relê o status novo, não
+    encontra um pedido "aguardando" e não faz nada.
+
+    O filtro por `user` é a defesa contra IDOR: pedido de outra conta, sem
+    dona ou inexistente dão o mesmo resultado (None -> False).
+    """
+    with transaction.atomic():
+        order = (
+            Order.objects
+            .select_for_update()
+            .filter(pk=order_id, user=user, status=Order.Status.AWAITING_PAYMENT)
+            .first()
+        )
+        if order is None:
+            return False
+        order.status = Order.Status.CANCELLED
+        order.save()  # o save() devolve o estoque (STOCK_RETURNING_TRANSITIONS)
+        return True
+
+
 def expire_overdue_orders(now=None, user=None):
     """Expira todos os pedidos vencidos (ou só os da conta `user`). Devolve quantos.
 

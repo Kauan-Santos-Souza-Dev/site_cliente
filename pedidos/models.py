@@ -21,10 +21,10 @@ STATE_CHOICES = [
     ]
 ]
 
-# Por quanto tempo, depois do envio, o pedido ainda conta como "ativo"
-# (decisão 92): a entrega pode estar a caminho e o prazo de desistência do
-# CDC (7 dias APÓS o recebimento) pode estar correndo. Pergunta à dona.
-SHIPPED_ACTIVE_PERIOD = timedelta(days=30)
+# Por quanto tempo, depois da ENTREGA, o pedido ainda conta como "ativo"
+# (decisões 92 e 95): o prazo de desistência do CDC (7 dias APÓS o recebimento)
+# pode estar correndo. Os 30 dias dão folga. Pergunta à dona.
+DELIVERED_ACTIVE_PERIOD = timedelta(days=30)
 
 
 class Order(models.Model):
@@ -38,6 +38,7 @@ class Order(models.Model):
         EXPIRED = 'expirado', 'Expirado'
         CANCELLED = 'cancelado', 'Cancelado'
         SHIPPED = 'enviado', 'Enviado'
+        DELIVERED = 'entregue', 'Entregue'
         REFUNDED = 'estornado', 'Estornado'
 
     # Tabela de transições permitidas (decisão 87): {status atual: {para onde pode ir}}.
@@ -47,15 +48,18 @@ class Order(models.Model):
     ALLOWED_TRANSITIONS = {
         Status.AWAITING_PAYMENT: {Status.PAID, Status.EXPIRED, Status.CANCELLED},
         Status.PAID: {Status.SHIPPED, Status.REFUNDED},
-        Status.SHIPPED: {Status.REFUNDED},
+        Status.SHIPPED: {Status.DELIVERED, Status.REFUNDED},
+        # Entregue ainda pode ser estornado: desistência do CDC art. 49.
+        Status.DELIVERED: {Status.REFUNDED},
         Status.EXPIRED: set(),
         Status.CANCELLED: set(),
         Status.REFUNDED: set(),
     }
 
-    # Transições que devolvem as peças ao estoque. Estorno de pedido ENVIADO
-    # não está aqui: a peça ainda está com a cliente, e só volta ao estoque
-    # quando chegar e for conferida (a dona ajusta no admin).
+    # Transições que devolvem as peças ao estoque. Estorno de pedido ENVIADO ou
+    # ENTREGUE não está aqui: a peça está com a cliente e só volta ao estoque
+    # quando chegar e for conferida. A dona usa a ação "Devolver peças ao
+    # estoque" do admin (restore_stock_manually, decisão 97).
     STOCK_RETURNING_TRANSITIONS = {
         (Status.AWAITING_PAYMENT, Status.EXPIRED),
         (Status.AWAITING_PAYMENT, Status.CANCELLED),
@@ -95,6 +99,11 @@ class Order(models.Model):
     expires_at = models.DateTimeField('reservado até', null=True, blank=True)
     # Quando virou "enviado" (usado para saber se o pedido ainda é "ativo").
     shipped_at = models.DateTimeField('enviado em', null=True, blank=True)
+    # Quando virou "entregue": o bloqueio de exclusão de conta conta daqui (decisão 95).
+    delivered_at = models.DateTimeField('entregue em', null=True, blank=True)
+    # Quando as peças voltaram ao estoque (automático ou manual). Serve de
+    # registro e de trava: o estoque nunca é devolvido duas vezes (decisão 97).
+    stock_restored_at = models.DateTimeField('estoque devolvido em', null=True, blank=True)
     created_at = models.DateTimeField('criado em', auto_now_add=True)
     updated_at = models.DateTimeField('atualizado em', auto_now=True)
 
@@ -178,6 +187,8 @@ class Order(models.Model):
             self.check_transition(old_status)
             if old_status != self.Status.SHIPPED and self.status == self.Status.SHIPPED:
                 self.shipped_at = timezone.now()
+            if old_status != self.Status.DELIVERED and self.status == self.Status.DELIVERED:
+                self.delivered_at = timezone.now()
             super().save(*args, **kwargs)
             if (old_status, self.status) in self.STOCK_RETURNING_TRANSITIONS:
                 self.restore_stock()
@@ -199,6 +210,34 @@ class Order(models.Model):
                 ProductVariant.objects.filter(pk=item.variant_id).update(
                     stock=F('stock') + item.quantity
                 )
+        # update(): grava só este campo, sem passar de novo pelo save() (que
+        # reaplicaria as regras de transição e a trava).
+        self.stock_restored_at = timezone.now()
+        Order.objects.filter(pk=self.pk).update(stock_restored_at=self.stock_restored_at)
+
+    def restore_stock_manually(self):
+        """Devolve o estoque de um pedido ESTORNADO que já tinha sido enviado.
+
+        A dona usa isto depois de receber a peça de volta e conferir que está
+        em bom estado (decisão 97). Devolve True se devolveu, False se o pedido
+        não é elegível: precisa estar estornado, ter sido enviado e ainda não
+        ter tido o estoque devolvido.
+
+        select_for_update(): trava a linha do pedido. Se a dona clicar duas
+        vezes (ou duas pessoas ao mesmo tempo), a segunda espera, relê
+        stock_restored_at já preenchido e não devolve de novo.
+        """
+        with transaction.atomic():
+            locked = Order.objects.select_for_update().get(pk=self.pk)
+            if (
+                locked.status != self.Status.REFUNDED
+                or locked.shipped_at is None
+                or locked.stock_restored_at is not None
+            ):
+                return False
+            locked.restore_stock()
+            self.stock_restored_at = locked.stock_restored_at
+            return True
 
     # --- Exibição ------------------------------------------------------------
 
@@ -213,14 +252,17 @@ def active_orders(user, now=None):
 
     - aguardando pagamento (peças reservadas, pagamento em curso);
     - pago (a loja ainda vai entregar);
-    - enviado há menos de SHIPPED_ACTIVE_PERIOD (entrega ou desistência em curso).
+    - enviado (a entrega está em curso, sem limite de tempo: a dona precisa
+      marcar como entregue, decisão 95);
+    - entregue há menos de DELIVERED_ACTIVE_PERIOD (desistência em curso).
 
     Q() junta condições com "ou" (|). Sem Q, o filter() só sabe fazer "e".
     """
     now = now or timezone.now()
     return user.orders.filter(
         Q(status__in=[Order.Status.AWAITING_PAYMENT, Order.Status.PAID])
-        | Q(status=Order.Status.SHIPPED, shipped_at__gt=now - SHIPPED_ACTIVE_PERIOD)
+        | Q(status=Order.Status.SHIPPED)
+        | Q(status=Order.Status.DELIVERED, delivered_at__gt=now - DELIVERED_ACTIVE_PERIOD)
     )
 
 

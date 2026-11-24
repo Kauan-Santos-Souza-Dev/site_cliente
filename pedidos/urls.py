@@ -10,4 +10,6 @@ urlpatterns = [
     # confere se o pedido é da conta logada (contra IDOR).
     path('meus-pedidos/', views.my_orders, name='my_orders'),
     path('meus-pedidos/<int:pk>/', views.order_detail, name='order_detail'),
+    # Só POST (a view recusa GET com 405). Cancela pedido aguardando pagamento.
+    path('meus-pedidos/<int:pk>/cancelar/', views.cancel_order, name='cancel_order'),
 ]

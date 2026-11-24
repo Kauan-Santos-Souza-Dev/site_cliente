@@ -20,7 +20,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from pedidos.models import SHIPPED_ACTIVE_PERIOD, active_orders
+from pedidos.models import DELIVERED_ACTIVE_PERIOD, active_orders
 
 from .emails import (
     send_account_exists_email,
@@ -282,7 +282,7 @@ def account_delete(request):
     if blocking_orders:
         context = {
             'blocking_orders': blocking_orders,
-            'shipped_active_days': SHIPPED_ACTIVE_PERIOD.days,
+            'delivered_active_days': DELIVERED_ACTIVE_PERIOD.days,
         }
         return render(request, 'contas/account_delete.html', context)
 

@@ -21,6 +21,13 @@
             <span class="status status--{{ order.status }}">{{ order.get_status_display }}</span>
             <span class="pedidos__total">R$ {{ order.total }}</span>
           </a>
+          {% if order.is_awaiting_payment %}
+          {# Form SEPARADO do link: um <form> não pode ficar dentro de um <a>. #}
+          <form method="post" action="{% url 'cancel_order' order.pk %}" data-confirmar="Cancelar o pedido nº {{ order.pk }}? As peças voltam para a loja e não dá para desfazer.">
+            {% csrf_token %}
+            <button type="submit" class="botao botao--perigo">Cancelar pedido</button>
+          </form>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>

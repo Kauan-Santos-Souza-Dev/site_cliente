@@ -3,6 +3,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from carrinho.cart import Cart
 from contas.decorators import verified_email_required
@@ -12,7 +13,7 @@ from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
 from .models import ShippingRate
 from .rate_limit import register_order, too_many_orders
-from .reservations import expire_overdue_orders
+from .reservations import cancel_order_by_customer, expire_overdue_orders
 from .shipping import ShippingUnavailableError, shipping_table
 from .whatsapp import build_whatsapp_url
 
@@ -113,3 +114,23 @@ def order_detail(request, pk):
         'whatsapp_url': build_whatsapp_url(order),
     }
     return render(request, 'pedidos/order_detail.html', context)
+
+
+@login_required
+@require_POST
+def cancel_order(request, pk):
+    """A cliente cancela um pedido dela que ainda aguarda pagamento.
+
+    - @require_POST: cancelar muda dados, então nunca por GET (um link ou um
+      robô poderia cancelar sem querer). O CSRF do Django protege o POST.
+    - A busca é pela conta logada (contra IDOR): pedido de outra cliente dá 404.
+    - Quem devolve o estoque, com trava, é cancel_order_by_customer.
+    """
+    # Se o prazo já venceu, o pedido vira "expirado" e a mensagem fica correta.
+    expire_overdue_orders(user=request.user)
+    order = get_object_or_404(request.user.orders, pk=pk)
+    if cancel_order_by_customer(request.user, order.pk):
+        messages.success(request, f'Pedido nº {order.pk} cancelado. As peças voltaram para a loja.')
+    else:
+        messages.error(request, f'O pedido nº {order.pk} não pode mais ser cancelado.')
+    return redirect('my_orders')
