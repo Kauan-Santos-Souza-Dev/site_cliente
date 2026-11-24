@@ -37,7 +37,7 @@ from pedidos.models import Order
 
 from .legal import ORDER_RETENTION, PRIVACY_POLICY_VERSION, TERMS_VERSION
 from .models import Consent
-from .test_utils import GOOD_PASSWORD, login_admin, make_customer
+from .test_utils import GOOD_PASSWORD, login_admin, make_customer, make_order, make_variant
 from .tokens import make_email_change_token, make_verification_token
 
 User = get_user_model()
@@ -681,7 +681,7 @@ class GroupsCommandTest(TestCase):
         self.run_command()
         self.run_command()
         self.assertEqual(Group.objects.filter(name='Loja').count(), 1)
-        self.assertEqual(Group.objects.get(name='Loja').permissions.count(), 17)
+        self.assertEqual(Group.objects.get(name='Loja').permissions.count(), 23)
 
     def test_conta_do_grupo_edita_produtos_mas_nao_ve_clientes(self):
         self.run_command()
@@ -1099,3 +1099,143 @@ class LegalPagesTest(TestCase):
         self.client.post(reverse('login'), {'username': 'cliente@example.com', 'password': GOOD_PASSWORD})
         # AXES_DISABLE_ACCESS_LOG = True (decisão 83).
         self.assertFalse(AccessLog.objects.exists())
+
+
+# ===========================================================================
+# v2 Etapa 5 — pedidos ligados à conta
+# ===========================================================================
+
+class DeleteAccountWithOrdersTest(TestCase):
+    """Exclusão bloqueada enquanto houver pedido ativo (decisão 92)."""
+
+    def setUp(self):
+        self.user = make_customer()
+        self.variant = make_variant(stock=10)
+        self.client.force_login(self.user)
+
+    def delete(self):
+        return self.client.post(reverse('account_delete'), {'password': GOOD_PASSWORD, 'confirm': 'on'})
+
+    def test_pedido_ativo_bloqueia_get_e_post(self):
+        order = make_order(user=self.user, variant=self.variant)
+        page = self.client.get(reverse('account_delete'))
+        self.assertContains(page, f'um pedido em andamento (nº {order.pk})')
+        self.assertNotContains(page, 'name="password"')  # o formulário nem aparece
+        # POST direto (sem passar pela página) também não exclui.
+        self.delete()
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.anonymized_at)
+
+    def test_pedido_pago_e_enviado_recente_tambem_bloqueiam(self):
+        for status in (Order.Status.PAID, Order.Status.SHIPPED):
+            with self.subTest(status=status):
+                order = make_order(user=self.user, status=status, variant=self.variant)
+                Order.objects.filter(pk=order.pk).update(shipped_at=timezone.now())
+                self.delete()
+                self.user.refresh_from_db()
+                self.assertIsNone(self.user.anonymized_at)
+                Order.objects.filter(pk=order.pk).update(status=Order.Status.EXPIRED)
+
+    def test_pedidos_encerrados_nao_bloqueiam_e_ficam_guardados(self):
+        expired = make_order(user=self.user, status=Order.Status.EXPIRED, variant=self.variant)
+        shipped = make_order(user=self.user, status=Order.Status.SHIPPED, variant=self.variant)
+        Order.objects.filter(pk=shipped.pk).update(shipped_at=timezone.now() - timedelta(days=60))
+        response = self.delete()
+        self.assertRedirects(response, reverse('account_deleted'))
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.anonymized_at)
+        # Os pedidos continuam ligados à conta (anonimizada), pelo prazo legal.
+        self.assertEqual(set(self.user.orders.all()), {expired, shipped})
+
+
+class ExportOrdersTest(TestCase):
+    """A exportação JSON inclui os pedidos da conta (decisão 93)."""
+
+    def setUp(self):
+        self.user = make_customer()
+        variant = make_variant(price='150.00', stock=10)
+        self.order = make_order(user=self.user, variant=variant, quantity=2, shipping_cost='19.90')
+        other = make_customer(email='outra@example.com')
+        make_order(user=other, variant=variant, customer_name='Ana Souza')
+        self.client.force_login(self.user)
+
+    def test_exporta_os_proprios_pedidos_e_nunca_os_de_outra_conta(self):
+        response = self.client.post(reverse('account_export'))
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(len(data['pedidos']), 1)
+        exported = data['pedidos'][0]
+        self.assertEqual(exported['numero'], self.order.pk)
+        self.assertEqual(exported['status'], 'Aguardando pagamento')
+        self.assertEqual(exported['itens'][0]['quantidade'], 2)
+        # Dinheiro como texto, sem perder centavos.
+        self.assertEqual(exported['frete'], '19.90')
+        self.assertEqual(exported['total'], '319.90')
+        self.assertEqual(exported['entrega']['rua'], 'Rua das Flores')
+        self.assertNotIn('Ana Souza', response.content.decode('utf-8'))
+
+
+class AnonymizeAdminActionTest(TestCase):
+    """Ação "Anonimizar contas" no admin (decisão 94)."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(email='dona@example.com', password=GOOD_PASSWORD)
+        login_admin(self.client, self.owner)
+        self.customer = make_customer(email='clara@example.com', first_name='Clara')
+        self.url = reverse('admin:contas_user_changelist')
+
+    def run_action(self, *users, confirm=False):
+        data = {'action': 'anonymize_accounts', '_selected_action': [user.pk for user in users]}
+        if confirm:
+            data['confirm'] = 'yes'
+        return self.client.post(self.url, data, follow=True)
+
+    def test_primeiro_passo_so_mostra_a_confirmacao(self):
+        response = self.run_action(self.customer)
+        self.assertContains(response, 'Não dá para desfazer')
+        self.assertContains(response, 'clara@example.com')
+        self.customer.refresh_from_db()
+        self.assertIsNone(self.customer.anonymized_at)
+
+    def test_confirmando_anonimiza(self):
+        response = self.run_action(self.customer, confirm=True)
+        self.assertContains(response, '1 conta(s) anonimizada(s)')
+        self.customer.refresh_from_db()
+        self.assertIsNotNone(self.customer.anonymized_at)
+        self.assertEqual(self.customer.first_name, '')
+
+    def test_pula_equipe_e_conta_com_pedido_ativo(self):
+        staff = make_customer(email='equipe@example.com', is_staff=True)
+        busy = make_customer(email='ocupada@example.com')
+        make_order(user=busy, variant=make_variant())
+        confirmation = self.run_action(staff, busy, self.owner)
+        self.assertContains(confirmation, 'conta da equipe')
+        self.assertContains(confirmation, 'tem pedido em andamento')
+        self.assertContains(confirmation, 'Nenhuma das contas selecionadas pode ser anonimizada')
+        self.run_action(staff, busy, self.owner, confirm=True)
+        for user in (staff, busy, self.owner):
+            user.refresh_from_db()
+            self.assertIsNone(user.anonymized_at)
+
+    def test_grupo_loja_nao_ve_a_acao(self):
+        """Sem a permissão de editar contas, a ação não existe para a conta."""
+        call_command('criar_grupos', stdout=io.StringIO())
+        staff = make_customer(email='equipe@example.com', is_staff=True)
+        staff.groups.add(Group.objects.get(name='Loja'))
+        client = Client()
+        login_admin(client, staff)
+        self.assertEqual(client.post(self.url, {
+            'action': 'anonymize_accounts', '_selected_action': [self.customer.pk], 'confirm': 'yes',
+        }).status_code, 403)
+        self.customer.refresh_from_db()
+        self.assertIsNone(self.customer.anonymized_at)
+
+
+class CleanupKeepsAccountsWithOrdersTest(TestCase):
+    """Conta nunca verificada COM pedido não é apagada pelo comando de limpeza."""
+
+    def test_conta_com_pedido_fica(self):
+        user = make_customer(email='antiga@example.com', verified=False)
+        make_order(user=user, variant=make_variant())
+        User.objects.filter(pk=user.pk).update(date_joined=timezone.now() - timedelta(days=31))
+        call_command('limpar_dados_antigos', stdout=io.StringIO())
+        self.assertTrue(User.objects.filter(pk=user.pk).exists())

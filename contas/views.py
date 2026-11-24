@@ -20,6 +20,8 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
+from pedidos.models import SHIPPED_ACTIVE_PERIOD, active_orders
+
 from .emails import (
     send_account_exists_email,
     send_email_change_link,
@@ -264,6 +266,7 @@ def account_delete(request):
 
     Contas do admin não se excluem por aqui: a dona trancaria o próprio
     painel. Isso é feito no servidor, por quem administra.
+    Conta com pedido ativo também não (decisão 92).
     """
     if request.user.is_staff:
         messages.error(
@@ -271,6 +274,17 @@ def account_delete(request):
             'Contas de administração não podem ser excluídas por esta página.',
         )
         return redirect('account')
+
+    # Com pedido ativo (decisão 92), a exclusão fica bloqueada: a loja ainda
+    # precisa entregar, receber ou devolver, e falar com a cliente. Vale para
+    # GET (nem mostra o formulário) e POST (alguém enviando o form direto).
+    blocking_orders = list(active_orders(request.user).values_list('pk', flat=True))
+    if blocking_orders:
+        context = {
+            'blocking_orders': blocking_orders,
+            'shipped_active_days': SHIPPED_ACTIVE_PERIOD.days,
+        }
+        return render(request, 'contas/account_delete.html', context)
 
     if request.method == 'POST':
         form = DeleteAccountForm(request.user, request.POST)

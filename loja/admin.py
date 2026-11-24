@@ -1,8 +1,8 @@
-"""Painel da loja (Django Admin) para categorias e produtos."""
+"""Painel da loja (Django Admin): categorias, produtos e configuração da loja."""
 
 from django.contrib import admin
 
-from .models import Category, Product, ProductImage, ProductVariant
+from .models import Category, Product, ProductImage, ProductVariant, StoreSettings
 
 
 class ProductVariantInline(admin.TabularInline):
@@ -55,3 +55,18 @@ class ProductAdmin(admin.ModelAdmin):
     @admin.display(description='estoque total')
     def total_stock(self, obj):
         return obj.total_stock
+
+
+@admin.register(StoreSettings)
+class StoreSettingsAdmin(admin.ModelAdmin):
+    """Configuração da loja: uma linha só, que se edita mas não se cria de novo nem se apaga."""
+
+    list_display = ('__str__', 'reservation_minutes', 'free_shipping_threshold', 'free_shipping_is_provisional')
+
+    def has_add_permission(self, request):
+        """Só permite "adicionar" se a linha ainda não existir."""
+        return not StoreSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        """Sem a configuração, o checkout não saberia o prazo da reserva."""
+        return False

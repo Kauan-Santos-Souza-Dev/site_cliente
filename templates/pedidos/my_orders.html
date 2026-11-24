@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% comment %}
+  "Meus pedidos" (view pedidos.views.my_orders, v2 Etapa 5).
+  A lista vem de request.user.orders: só os pedidos da conta logada (contra IDOR).
+{% endcomment %}
+
+{% block title %}Meus pedidos — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <h1 class="secao__titulo">Meus pedidos</h1>
+
+    {% if orders %}
+      <ul class="pedidos">
+        {% for order in orders %}
+        <li class="pedidos__item">
+          <a class="pedidos__link" href="{% url 'order_detail' order.pk %}">
+            <span class="pedidos__numero">Pedido nº {{ order.pk }}</span>
+            <span class="pedidos__data">{{ order.created_at|date:"d/m/Y H:i" }}</span>
+            <span class="status status--{{ order.status }}">{{ order.get_status_display }}</span>
+            <span class="pedidos__total">R$ {{ order.total }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Você ainda não fez nenhum pedido.</p>
+      <p><a class="botao" href="{% url 'catalog' %}">Ver o catálogo</a></p>
+    {% endif %}
+
+    <p class="conta__alternativa"><a href="{% url 'account' %}">← Minha conta</a></p>
+  </div>
+</section>
+{% endblock %}

@@ -28,9 +28,14 @@ GROUP_PERMISSIONS = {
     ('loja', 'product'): ['add', 'change', 'delete', 'view'],
     ('loja', 'productvariant'): ['add', 'change', 'delete', 'view'],
     ('loja', 'productimage'): ['add', 'change', 'delete', 'view'],
-    # Pedido: o admin já limita o que pode ser apagado (decisão 46).
+    # Configuração da loja: uma linha só, que não se cria nem se apaga (decisão 89).
+    ('loja', 'storesettings'): ['change', 'view'],
+    # Pedido: o status muda só pelas ações do admin, e o admin limita o que
+    # pode ser apagado (decisões 46 e 87).
     ('pedidos', 'order'): ['change', 'delete', 'view'],
     ('pedidos', 'orderitem'): ['view'],
+    # Tabela de frete por UF (decisão 90).
+    ('pedidos', 'shippingrate'): ['add', 'change', 'delete', 'view'],
 }
 
 

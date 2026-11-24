@@ -7,6 +7,18 @@
 <section class="secao secao--topo">
   <div class="container conta texto-pagina">
     <h1 class="secao__titulo">Excluir minha conta</h1>
+
+    {% if blocking_orders %}
+      {# Conta com pedido ativo (decisão 92): o formulário nem aparece. #}
+      <p class="mensagem mensagem--error" role="alert">
+        Você tem {% if blocking_orders|length == 1 %}um pedido em andamento (nº {{ blocking_orders.0 }}){% else %}pedidos em andamento (nº {{ blocking_orders|join:", " }}){% endif %}.
+        A conta poderá ser excluída depois que {% if blocking_orders|length == 1 %}ele for concluído{% else %}eles forem concluídos{% endif %}.
+      </p>
+      <p>Enquanto o pedido está aguardando pagamento, pago ou a caminho, precisamos da sua conta para entregar, devolver o dinheiro ou falar com você. Pedido enviado conta como "em andamento" por {{ shipped_active_days }} dias depois do envio.</p>
+      <p>Dúvidas? Fale com a gente pelo <a href="https://wa.me/{{ WHATSAPP_NUMBER }}" target="_blank" rel="noopener">WhatsApp</a> ou pelo e-mail <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a>.</p>
+      <p><a class="botao" href="{% url 'my_orders' %}">Ver meus pedidos</a></p>
+      <p class="conta__alternativa"><a href="{% url 'account' %}">Voltar para Minha conta</a></p>
+    {% else %}
     <p>Ao excluir a conta:</p>
     <ul class="lista-simples">
       <li>seu nome e seu e-mail são apagados e a conta deixa de funcionar;</li>
@@ -22,6 +34,7 @@
       <button class="botao botao--largo botao--perigo" type="submit">Excluir minha conta</button>
     </form>
     <p class="conta__alternativa"><a href="{% url 'account' %}">Cancelar e voltar</a></p>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

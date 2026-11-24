@@ -194,9 +194,65 @@ function ativarAvisoCookies() {
   });
 }
 
+/**
+ * Checkout: mostra o frete e o total ao escolher a UF (v2 Etapa 5, decisão 90).
+ *
+ * A tabela vem do servidor num <script type="application/json"> (filtro
+ * json_script do Django). É só para MOSTRAR: o valor cobrado é calculado de
+ * novo pelo servidor ao confirmar o pedido.
+ *
+ * Dinheiro em CENTAVOS (números inteiros): em JavaScript, 0.1 + 0.2 dá
+ * 0.30000000000000004. Somando centavos inteiros não há esse erro.
+ */
+function ativarFreteCheckout() {
+  const dadosTabela = document.getElementById('tabela-frete');
+  const campoUF = document.getElementById('id_state');
+  const totais = document.querySelector('.checkout__totais');
+  if (!dadosTabela || !campoUF || !totais) return;
+
+  const tabela = JSON.parse(dadosTabela.textContent);
+  const freteValor = document.getElementById('frete-valor');
+  const totalValor = document.getElementById('total-valor');
+
+  // "229.90" -> 22990 (centavos)
+  function emCentavos(texto) {
+    const [reais, centavos = '0'] = texto.split('.');
+    return Number(reais) * 100 + Number(centavos.padEnd(2, '0').slice(0, 2));
+  }
+  // 22990 -> "R$ 229,90"
+  function emReais(centavos) {
+    const reais = Math.floor(centavos / 100).toLocaleString('pt-BR');
+    return 'R$ ' + reais + ',' + String(centavos % 100).padStart(2, '0');
+  }
+
+  const totalProdutos = emCentavos(totais.dataset.totalProdutos);
+
+  function atualizar() {
+    const uf = campoUF.value;
+    if (!uf) {
+      freteValor.textContent = 'escolha a UF';
+      totalValor.textContent = emReais(totalProdutos) + ' + frete';
+      return;
+    }
+    if (!(uf in tabela.rates)) {
+      freteValor.textContent = 'ainda não entregamos nesta UF';
+      totalValor.textContent = emReais(totalProdutos);
+      return;
+    }
+    const gratis = tabela.free_from !== null && totalProdutos >= emCentavos(tabela.free_from);
+    const frete = gratis ? 0 : emCentavos(tabela.rates[uf]);
+    freteValor.textContent = gratis ? 'grátis' : emReais(frete);
+    totalValor.textContent = emReais(totalProdutos + frete);
+  }
+
+  campoUF.addEventListener('change', atualizar);
+  atualizar(); // o formulário pode voltar com a UF já escolhida (erro em outro campo)
+}
+
 ativarMenuMobile();
 ativarCabecalhoInteligente();
 ativarRevelacaoNoScroll();
 ativarParallax();
 ativarGaleriaProduto();
 ativarAvisoCookies();
+ativarFreteCheckout();

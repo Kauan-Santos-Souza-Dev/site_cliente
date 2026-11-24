@@ -1,28 +1,31 @@
-"""Views de pedido: checkout (formulário) e confirmação."""
+"""Views de pedido: checkout, "Meus pedidos" e detalhe do pedido."""
 
 from django.contrib import messages
-from django.shortcuts import redirect, render
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, redirect, render
 
 from carrinho.cart import Cart
 from contas.decorators import verified_email_required
+from loja.models import StoreSettings
 
 from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
-from .models import Order
+from .models import ShippingRate
 from .rate_limit import register_order, too_many_orders
+from .reservations import expire_overdue_orders
+from .shipping import ShippingUnavailableError, shipping_table
 from .whatsapp import build_whatsapp_url
-
-# Chave da sessão com o número do último pedido feito neste navegador.
-LAST_ORDER_SESSION_KEY = 'last_order_id'
 
 
 @verified_email_required
 def checkout(request):
-    """GET: mostra o formulário. POST: cria o pedido e vai para a confirmação.
+    """GET: mostra o formulário. POST: cria o pedido e vai para o detalhe dele.
 
-    Só para quem está logada e já confirmou o e-mail (decisão 72). Navegar e
-    montar o carrinho continuam livres para visitantes (decisão 55).
+    Só para quem está logada e já confirmou o e-mail (decisões 55 e 72).
+    Navegar e montar o carrinho continuam livres para visitantes.
     """
+    # Libera reservas vencidas antes de conferir o estoque (decisão 88).
+    expire_overdue_orders()
     cart = Cart(request)
     items = cart.items()
 
@@ -46,42 +49,67 @@ def checkout(request):
             )
         elif form.is_valid():
             try:
-                order = create_order(cart, form)
+                order = create_order(cart, form, request.user)
             except OutOfStockError as error:
                 # Nada foi salvo (transaction.atomic desfez tudo).
                 messages.error(request, str(error))
                 return redirect('cart_detail')
-            # Só pedidos criados de verdade contam para o limite.
-            register_order(request)
-            cart.clear()
-            # Guardamos o número do pedido na sessão: só este navegador pode
-            # ver a página de confirmação, que mostra nome e endereço.
-            request.session[LAST_ORDER_SESSION_KEY] = order.pk
-            return redirect('order_confirmation')
+            except ShippingUnavailableError as error:
+                # UF sem frete: o erro aparece no campo UF e nada é salvo.
+                form.add_error('state', str(error))
+            else:
+                # Só pedidos criados de verdade contam para o limite.
+                register_order(request)
+                cart.clear()
+                messages.success(request, f'Pedido nº {order.pk} recebido!')
+                # O número na URL é seguro: order_detail só mostra pedidos
+                # da conta logada (decisão 91).
+                return redirect('order_detail', pk=order.pk)
     else:
-        form = CheckoutForm()
+        # Já sugere o nome da conta; a cliente pode trocar (ex.: presente).
+        form = CheckoutForm(initial={'customer_name': request.user.get_full_name()})
 
+    items_total = sum(item['subtotal'] for item in items)
     context = {
         'form': form,
         'items': items,
-        'total': sum(item['subtotal'] for item in items),
+        'items_total': items_total,
+        # Tabela de frete: para o JavaScript (shipping_table, em texto) e para
+        # a lista visível sem JavaScript (shipping_rates). Só para EXIBIR: o
+        # frete cobrado é calculado de novo no servidor, em create_order().
+        'shipping_table': shipping_table(),
+        'shipping_rates': ShippingRate.objects.order_by('state'),
+        'free_shipping_threshold': StoreSettings.load().free_shipping_threshold,
     }
     return render(request, 'pedidos/checkout.html', context)
 
 
-def order_confirmation(request):
-    """Página "Pedido recebido" com o botão que abre o WhatsApp da loja.
+@login_required
+def my_orders(request):
+    """Lista "Meus pedidos": SÓ os pedidos da conta logada.
 
-    Não há número de pedido na URL: o pedido vem da sessão. Assim ninguém
-    consegue ver o pedido (e o endereço) de outra pessoa trocando o número.
+    Contra IDOR (Insecure Direct Object Reference): a consulta parte sempre
+    de request.user.orders, nunca de Order.objects.all().
     """
-    order_id = request.session.get(LAST_ORDER_SESSION_KEY)
-    order = Order.objects.filter(pk=order_id).prefetch_related('items').first()
-    if order is None:
-        return redirect('home')
+    expire_overdue_orders(user=request.user)
+    orders = request.user.orders.prefetch_related('items')
+    return render(request, 'pedidos/my_orders.html', {'orders': orders})
 
+
+@login_required
+def order_detail(request, pk):
+    """Detalhe de um pedido da conta logada.
+
+    get_object_or_404 com pk E user: se o número for de outra cliente (ou não
+    existir), a resposta é a MESMA: 404. Um 403 ("proibido") confirmaria que
+    aquele pedido existe.
+    """
+    expire_overdue_orders(user=request.user)
+    order = get_object_or_404(
+        request.user.orders.prefetch_related('items'), pk=pk
+    )
     context = {
         'order': order,
         'whatsapp_url': build_whatsapp_url(order),
     }
-    return render(request, 'pedidos/confirmation.html', context)
+    return render(request, 'pedidos/order_detail.html', context)

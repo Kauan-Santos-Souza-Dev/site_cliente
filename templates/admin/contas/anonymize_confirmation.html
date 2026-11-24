@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+  Confirmação da ação "Anonimizar contas" (contas/admin.py::UserAdmin.anonymize_accounts).
+  Esta página NÃO muda nada. O botão reenvia as mesmas contas com confirm=yes.
+{% endcomment %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Início</a>
+  &rsaquo; <a href="{% url 'admin:contas_user_changelist' %}">Usuários</a>
+  &rsaquo; Anonimizar contas
+</div>
+{% endblock %}
+
+{% block content %}
+{% if allowed %}
+  <p>As contas abaixo serão <strong>anonimizadas</strong>. <strong>Não dá para desfazer.</strong></p>
+  <ul>
+    <li>nome e e-mail apagados, senha inutilizada e conta desativada;</li>
+    <li>a cliente sai de todos os aparelhos;</li>
+    <li>os pedidos continuam guardados pelo prazo legal (Política de Privacidade).</li>
+  </ul>
+  <h2>Serão anonimizadas ({{ allowed|length }})</h2>
+  <ul>{% for user in allowed %}<li>{{ user.email }}</li>{% endfor %}</ul>
+{% else %}
+  <p>Nenhuma das contas selecionadas pode ser anonimizada.</p>
+{% endif %}
+
+{% if skipped %}
+  <h2>Serão puladas ({{ skipped|length }})</h2>
+  <ul>{% for user, reason in skipped %}<li>{{ user.email }}: {{ reason }}</li>{% endfor %}</ul>
+{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+  {% for pk in selected_ids %}<input type="hidden" name="{{ action_checkbox_name }}" value="{{ pk }}">{% endfor %}
+  <input type="hidden" name="action" value="anonymize_accounts">
+  {% if allowed %}
+    <input type="hidden" name="confirm" value="yes">
+    <input type="submit" value="Sim, anonimizar">
+  {% endif %}
+  <a href="{% url 'admin:contas_user_changelist' %}" class="button cancel-link">Não, voltar</a>
+</form>
+{% endblock %}

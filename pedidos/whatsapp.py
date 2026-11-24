@@ -1,4 +1,4 @@
-"""Monta a mensagem do pedido e o link do WhatsApp da loja."""
+"""Formatação de dinheiro (R$) e o link do WhatsApp para falar sobre um pedido."""
 
 from urllib.parse import quote
 
@@ -16,41 +16,13 @@ def format_brl(value):
     return f'R$ {brazilian}'
 
 
-def format_cep(cep):
-    """"01234567" -> "01234-567"."""
-    return f'{cep[:5]}-{cep[5:]}'
-
-
-def format_phone(phone):
-    """"11912345678" -> "(11) 91234-5678"; "1132345678" -> "(11) 3234-5678"."""
-    return f'({phone[:2]}) {phone[2:-4]}-{phone[-4:]}'
-
-
 def build_message(order):
-    """Texto do pedido que a cliente envia à loja pelo WhatsApp."""
-    lines = [
-        f'Olá! Acabei de fazer o pedido nº {order.pk} no site.',
-        '',
-        '*Itens:*',
-    ]
-    for item in order.items.all():
-        lines.append(
-            f'- {item.product_name} (tam. {item.size}) x{item.quantity}: '
-            f'{format_brl(item.subtotal)}'
-        )
+    """Texto que a cliente envia à loja pelo WhatsApp para falar de um pedido.
 
-    complement = f', {order.complement}' if order.complement else ''
-    lines += [
-        '',
-        f'*Total:* {format_brl(order.items_total)}',
-        'Frete: a combinar',
-        '',
-        f'*Nome:* {order.customer_name}',
-        f'*Telefone:* {format_phone(order.phone)}',
-        f'*Entrega:* {order.street}, {order.number}{complement} - '
-        f'{order.neighborhood}, {order.city}/{order.state} - CEP {format_cep(order.cep)}',
-    ]
-    return '\n'.join(lines)
+    Na v2 o pedido fica no site (Meus pedidos), então a mensagem leva só o
+    número: menos dado pessoal (nome, endereço) circulando numa URL.
+    """
+    return f'Olá! Quero falar sobre o meu pedido nº {order.pk} no site.'
 
 
 def build_whatsapp_url(order):

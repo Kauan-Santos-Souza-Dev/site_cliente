@@ -18,6 +18,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 2 | Usuário customizado e autenticação básica | 64 a 69 |
 | v2 · 3 | Segurança da conta | 70 a 76 (e atualiza 65, 66 e 69) |
 | v2 · 4 | LGPD: aceite, Minha conta, retenção, textos legais, cookies | 77 a 85 (e reescreve 69) |
+| v2 · 5 | Pedido ligado à conta, status, reserva de estoque, frete, Meus pedidos | 86 a 94 (e atualiza 44, 46, 78 e 80) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -220,6 +221,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** depois de salvar, a cliente vai para `/pedido/confirmado/`, com o número do pedido, o resumo e o botão "Enviar pedido pelo WhatsApp" (link `wa.me` com a mensagem codificada por `urllib.parse.quote`).
 - **Por quê:** decisão da loja. No redirecionamento direto, se o WhatsApp não abrir (computador sem o app), a cliente perde o número do pedido.
 - **Segurança:** a URL não tem o número do pedido; ele vem da sessão (`last_order_id`). Assim ninguém vê o nome e o endereço de outra pessoa trocando um número na URL.
+- **Atualização (v2 Etapa 5):** a página de confirmação e o `last_order_id` saíram. Com o pedido ligado à conta, o checkout leva ao detalhe do pedido em "Meus pedidos", protegido pelo filtro da dona (decisão 91).
 
 ## 45. Telefone e CEP só com dígitos — Etapa 7
 - **Escolha:** o formulário aceita "(11) 91234-5678" e "01234-567", mas guarda só os dígitos (`clean_phone`, `clean_cep`). Telefone com 10 ou 11 dígitos; CEP com 8. A formatação volta na exibição (`format_phone`, `format_cep`, `format_brl` em `pedidos/whatsapp.py`).
@@ -229,6 +231,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 ## 46. Admin de pedidos — Etapa 7
 - **Escolha:** itens somente leitura dentro do pedido; status editável na lista; ação "Cancelar pedidos selecionados (devolve o estoque)"; sem botão "Adicionar" (pedido só nasce pelo site, que desconta o estoque); exclusão permitida só para pedidos cancelados ou enviados, e sem a exclusão em massa padrão.
 - **Por quê:** apagar um pedido "novo" sumiria com as peças reservadas sem devolvê-las.
+- **Atualização (v2 Etapa 5):** o status deixou de ser editável na lista; muda só por ações que respeitam a tabela de transições (decisão 87). Só pedidos **cancelados ou expirados** podem ser apagados.
 - **Sem `date_hierarchy`:** ele usa `CONVERT_TZ` do MySQL, que exige as tabelas de fuso horário instaladas no servidor (no MySQL para Windows elas não vêm) e quebraria a lista. O filtro lateral por data funciona sem isso. Os testes pegaram o problema.
 
 ## 47. Limite de 5 pedidos por hora por IP — Etapa 8
@@ -368,11 +371,12 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 ## 69. Pendências de produção (sem bloquear o desenvolvimento) — v2 Etapa 2 (reescrita na v2 Etapa 4)
 - **Histórico:** na Etapa 2, esta decisão dizia "não publicar antes da v2 Etapa 3", porque o login não bloqueava tentativas e o cadastro revelava e-mails. A Etapa 3 resolveu os dois pontos (decisões 71 e 73).
 - **Agora:** o desenvolvimento segue normalmente. A loja só vai ao ar quando **todas** estas pendências estiverem resolvidas:
-  1. v2 Etapas 5 e 9 concluídas (pedido ligado à conta; revisão final de segurança).
-  2. **Agendamento** do comando `limpar_dados_antigos` (decisão 79). Hoje ele é manual.
+  1. v2 Etapas 7, 8 e 9 concluídas (pagamento e revisão final de segurança). A Etapa 5 (pedido ligado à conta) foi concluída.
+  2. **Agendamento** dos comandos `limpar_dados_antigos` (decisão 79, diário) e `expirar_pedidos` (decisão 88, a cada 5 minutos). Hoje eles são manuais.
   3. **Hospedagem definida** (atualizar os operadores e o prazo de backup na Política, decisão 84).
   4. **Revisão jurídica** da Política de Privacidade e dos Termos de Uso.
   5. **Identificação do fornecedor** (nome, CNPJ, endereço comercial) preenchida pela dona no `.env` (decisão 85).
+  6. **Valores reais do frete** (tabela por UF e frete grátis) confirmados pela dona e desmarcados como "PROVISÓRIO" no admin (decisão 90).
 - O checklist do README ("Checklist antes de publicar") repete esta lista.
 
 ## 70. MySQL com usuário dedicado, sem root — v2 Etapa 3
@@ -440,7 +444,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** "Excluir minha conta" (com senha atual + caixa de confirmação) chama `anonymize_user` (`contas/privacy.py`): e-mail vira `anonimizada-<id>@anonimizado.invalid`, nome e sobrenome vazios, senha inutilizável, conta inativa, `anonymized_at` preenchido. Também apaga os registros do axes daquele e-mail, os dispositivos 2FA e troca o e-mail no histórico do admin (`django_admin_log`) por "Conta anonimizada". Tudo dentro de `transaction.atomic()`.
 - **Por quê:** a linha da conta continua existindo para que os pedidos (ligados à conta na Etapa 5) sigam guardados pelo prazo da decisão 79, sem identificar a cliente (dado anonimizado não é dado pessoal, art. 12). A senha inutilizável muda o hash, e o Django derruba **todas** as sessões abertas da conta.
 - **Segurança:** pede a senha (protege contra quem acha o computador com a conta aberta); POST com CSRF; contas `is_staff` não se excluem pelo site (a dona trancaria o admin).
-- **Pendência para a Etapa 5:** bloquear ou condicionar a exclusão enquanto houver pedido **ativo** (aguardando pagamento, pago e não entregue, estorno em andamento).
+- **Pendência para a Etapa 5 (resolvida):** a exclusão é bloqueada enquanto houver pedido **ativo** (decisão 92), e a dona também pode anonimizar pelo admin (decisão 94).
 - **Descartado:** apagar a linha (`delete()`): os pedidos perderiam o vínculo ou seriam apagados junto, contra a guarda legal.
 
 ## 79. Prazos de retenção e comando de limpeza (manual por enquanto) — v2 Etapa 4
@@ -462,7 +466,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 ## 80. Exportação dos dados em JSON — v2 Etapa 4
 - **Escolha:** botão "Baixar meus dados" (POST com CSRF) devolve `meus-dados-elegancia-crista.json` com a conta e os aceites (`export_user_data`). Sem o hash da senha.
 - **Por quê:** atende acesso e portabilidade (art. 18, II e V) num formato aberto, legível por pessoas e programas, sem dependência nova. POST impede que outro site dispare o download com a sessão da cliente.
-- **Etapa 5:** os pedidos entram na exportação quando forem ligados à conta.
+- **Etapa 5 (feito):** os pedidos da conta entram na exportação (decisão 93).
 - **Descartado:** PDF (precisaria de biblioteca nova); CSV (ruim para dados aninhados, como a lista de aceites).
 
 ## 81. Troca de e-mail verificada no novo endereço — v2 Etapa 4
@@ -502,3 +506,87 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Cuidados:** só existe campo de **CNPJ** (não de CPF) e o endereço é o **comercial**: o site não deve exibir CPF nem endereço residencial da dona. Nenhum dado pessoal real dela entra no repositório (o `.env` fica fora do Git).
 - **Pendência:** preencher quando o CNPJ existir (decisão 69, item 5).
 - **Descartado:** constantes em `contas/legal.py` (preencher exigiria commit e colocaria dados no Git); model editável no admin (mais código para três textos que mudam uma vez).
+
+## 86. Pedido ligado à conta; pedidos da v1 ficam sem dona — v2 Etapa 5
+- **Escolha:** `Order.user` (`ForeignKey` para `AUTH_USER_MODEL`, `related_name='orders'`) com `on_delete=PROTECT` e `null=True`. Todo pedido novo recebe a conta em `create_order(cart, form, user)`.
+- **PROTECT:** o banco recusa apagar uma conta que tem pedido. A exclusão pedida pela cliente é anonimização (decisão 78), que mantém a linha. Por isso o pedido segue ligado à conta pelo prazo da decisão 79.
+- **Migração dos pedidos existentes:** ficam com `user = NULL`. Descartado "adivinhar" a dona pelo nome ou telefone: um palpite errado mostraria nome e endereço de uma cliente para outra (vazamento). Eles aparecem no admin e não aparecem em nenhum "Meus pedidos".
+- **Migrations separadas:** `pedidos/0002` (estrutura) e `0003`/`0004` (dados), cada uma com função de volta. Testado ida e volta no banco de desenvolvimento.
+- **Cuidado:** no MySQL, mudanças de estrutura não são desfeitas se a migration falhar no meio. Antes do `migrate`, faça backup com `mysqldump` (README).
+
+## 87. Seis status e uma tabela de transições no model — v2 Etapa 5
+- **Status:** `aguardando_pagamento`, `pago`, `expirado`, `cancelado`, `enviado`, `estornado`. Os da v1 foram migrados: `novo → aguardando_pagamento` (sem prazo) e `confirmado → pago`.
+- **Tabela (`Order.ALLOWED_TRANSITIONS`):**
+  - aguardando → pago / expirado / cancelado;
+  - pago → enviado / estornado;
+  - enviado → estornado;
+  - expirado, cancelado e estornado são finais.
+- **Estoque (`STOCK_RETURNING_TRANSITIONS`):** volta em aguardando → expirado, aguardando → cancelado e pago → estornado. **Não** volta no estorno de pedido enviado: a peça está com a cliente e só entra no estoque quando chegar e for conferida (pergunta à dona).
+- **Onde:** no `Order.save()`, como na decisão 43. Ele lê o status do banco **com trava**, recusa transição proibida (`ValidationError`), preenche `shipped_at` e devolve o estoque. Vale para o admin, o comando, o shell e o webhook das Etapas 7 e 8.
+- **"Pago" nunca à mão:** no admin, o status é só leitura e muda por duas ações: "Marcar como enviado" (só de pago) e "Cancelar" (só de aguardando). Não existe ação "marcar como pago": quem confirma pagamento é o gateway (regra inegociável do CLAUDE.md).
+- **Descartado:** biblioteca de máquina de estados (`django-fsm`), mais uma dependência para um dicionário de 6 linhas.
+
+## 88. Reserva de estoque com prazo: comando + expiração "preguiçosa" — v2 Etapa 5
+- **Reserva:** a baixa do estoque no checkout (decisão 42) já é a reserva. `Order.expires_at = agora + StoreSettings.reservation_minutes` (30 min, decisão 58). Pedidos sem prazo (os da v1) nunca expiram sozinhos.
+- **Expiração (`pedidos/reservations.py`):** `expire_order` abre uma transação, busca o pedido **com trava** e confere de novo "aguardando **e** vencido" antes de marcar "expirado". O `save()` devolve o estoque.
+- **Quem chama:**
+  1. o comando `python manage.py expirar_pedidos [--dry-run]`, para qualquer agendador (cron, Agendador de Tarefas do Windows, scheduler da hospedagem), sugerido a cada 5 minutos;
+  2. a **expiração preguiçosa**: `expire_overdue_orders()` no começo da página do produto, de "adicionar ao carrinho", do checkout e de "Meus pedidos". No caso comum é uma consulta só, pelo índice `(status, expires_at)`.
+- **Por que os dois:** a hospedagem não foi escolhida. Sem agendador, a peça vencida volta assim que alguém tenta comprá-la. Com agendador, o estoque também fica certo no catálogo e na API.
+- **Concorrência:**
+  - (a) A trava na linha do pedido faz o 2º processo esperar e reler: comando + página, ou expiração + pagamento, nunca devolvem o estoque duas vezes (teste da "corrida").
+  - (b) A devolução usa `F('stock') + qtd`.
+  - (c) As variações são travadas e atualizadas **em ordem de id** no checkout e na devolução, para evitar *deadlock* (dois processos esperando um pelo outro).
+- **Pendência para a Etapa 7:** pagamento que chega depois de o pedido expirar. O Pix será criado no Mercado Pago com o mesmo `expires_at`, e o caso residual vira estorno.
+- **Descartado:** Celery/fila de tarefas (infraestrutura demais para uma loja pequena); expirar só pela página (sem garantia de que alguém abra).
+
+## 89. `StoreSettings`: configuração única da loja no admin — v2 Etapa 5
+- **Escolha:** `loja.StoreSettings`, uma linha só (o `save()` força `id=1`; `StoreSettings.load()` lê ou cria).
+  - Campos desta etapa: `reservation_minutes` (5 a 1440) e `free_shipping_threshold` (com marca de provisório).
+  - A v2 Etapa 6 acrescenta o parcelamento aqui.
+- **Admin:** sem "adicionar" quando a linha existe e sem "excluir". O grupo "Loja" pode ver e editar.
+- **Por que no app `loja`:** são regras da loja inteira (frete, reserva, parcelas), não de um app só.
+- **Descartado:** valores no `settings.py`/`.env` (a dona dependeria de programador para mudar); biblioteca de "settings no admin" (dependência para um model de 3 campos).
+
+## 90. Frete por UF com frete grátis, valores provisórios — v2 Etapa 5
+- **Escolha:** `pedidos.ShippingRate` (UF única, região, preço, `is_provisional`), editável na lista do admin.
+  - UF sem linha = "ainda não entregamos neste estado": o checkout recusa, com mensagem no campo UF.
+  - Frete grátis quando a **soma dos produtos ≥ limite** (`StoreSettings`).
+- **Valores iniciais (PROVISÓRIOS, migration `0004`):** Sudeste R$ 19,90 · Sul R$ 24,90 · Centro-Oeste R$ 29,90 · Nordeste R$ 34,90 · Norte R$ 39,90; grátis a partir de R$ 299,00. O admin mostra um aviso enquanto houver UF provisória.
+- **Cálculo (`pedidos/shipping.py::calculate_shipping`):** dentro da transação do checkout, com os preços das variações travadas. O resultado fica em `Order.shipping_cost`: mudar a tabela depois não muda o pedido.
+- **Tela:**
+  - A tabela vai para a página por `json_script`, e o JavaScript mostra frete e total ao escolher a UF, somando em **centavos inteiros** (sem erro de `float`).
+  - Sem JS, um `<details>` mostra a tabela.
+  - O valor cobrado é sempre o do servidor. A cliente vê o total final no pedido **antes** de pagar (Etapas 7 e 8).
+- **Descartado:** tabela por região (com 27 linhas, a dona pode dar preço diferente a um estado sem mudar o código); consulta ao servidor a cada troca de UF (mais uma rota para o mesmo resultado).
+
+## 91. "Meus pedidos" filtrado pela dona; detalhe substitui a confirmação — v2 Etapa 5
+- **Escolha:** `/pedido/meus-pedidos/` e `/pedido/meus-pedidos/<id>/`, com `@login_required`.
+  - A consulta parte **sempre** de `request.user.orders`.
+  - O detalhe usa `get_object_or_404(request.user.orders, pk=pk)`.
+- **IDOR:** pedido de outra cliente, pedido sem dona e número inexistente dão a **mesma** resposta: 404. Um 403 confirmaria que o número existe. Testado.
+- **Depois do checkout:** a cliente vai direto ao detalhe do pedido (status, "reservado até HH:MM", itens, frete, total, entrega). A página `/pedido/confirmado/` e a chave de sessão `last_order_id` (decisão 44) saíram: o filtro pela dona faz o mesmo papel em qualquer aparelho.
+- **WhatsApp:** o botão "Falar com a loja sobre este pedido" leva só o **número** do pedido na mensagem (a v1 levava nome, telefone e endereço na URL). Menos dado pessoal circulando; a loja vê o resto no admin.
+
+## 92. Pedido "ativo" bloqueia a exclusão da conta — v2 Etapa 5
+- **Definição (`pedidos/models.py::active_orders`):**
+  - **Ativos:** aguardando pagamento, pago, ou **enviado há menos de 30 dias** (`SHIPPED_ACTIVE_PERIOD`).
+  - **Não ativos:** expirado, cancelado, estornado, enviado há mais de 30 dias.
+- **Por quê:** enquanto o pedido está em curso, a loja precisa da conta para entregar, devolver o dinheiro (desistência do CDC, 7 dias **após o recebimento**) ou falar com a cliente. Os 30 dias depois do envio cobrem transporte + prazo de desistência. **Pergunta à dona.**
+- **Onde:** `contas/views.py::account_delete`.
+  - Bloqueia no GET (não mostra o formulário) **e** no POST (contra quem envia o formulário direto), com mensagem e os números dos pedidos.
+  - A Política de Privacidade explica a regra (versão `2026-11-22.2`).
+- **Defesa extra:** `delete_old_unverified_accounts` ignora contas com pedido (além do `PROTECT`).
+
+## 93. Exportação JSON com os pedidos — v2 Etapa 5
+- **Escolha:** `export_user_data` ganhou `"pedidos"`: número, data, status, itens, produtos, frete, total e dados de entrega.
+- **Detalhes:** dinheiro como texto (`"319.90"`, decisão 33). Só entra `user.orders`; um teste garante que o pedido de outra conta não aparece.
+
+## 94. Ação "Anonimizar contas" no admin — v2 Etapa 5
+- **Escolha:** ação em `contas/admin.py::UserAdmin`, para atender pedidos de exclusão que chegam por e-mail ou WhatsApp. Reaproveita `anonymize_user` (decisão 78).
+- **Confirmação em 2 passos**, como o "excluir selecionados" do Django:
+  1. O 1º POST mostra `templates/admin/contas/anonymize_confirmation.html` ("não dá para desfazer", lista do que será feito e do que será pulado) e não muda nada.
+  2. O 2º POST, com `confirm=yes`, executa. As regras são conferidas **de novo** nesse passo.
+- **Pula (e diz por quê):** contas da equipe (`is_staff`/`is_superuser`), contas já anonimizadas e contas com pedido ativo (decisão 92).
+- **Permissão:** `permissions=['change']`. Só quem edita contas (a superusuária) vê a ação; o grupo "Loja" recebe 403. Testado.
+- **Atenção à dona:** antes de anonimizar a pedido de alguém por e-mail ou WhatsApp, confirmar que o pedido veio **do e-mail da conta**. Senão, qualquer pessoa poderia pedir a exclusão da conta de outra.

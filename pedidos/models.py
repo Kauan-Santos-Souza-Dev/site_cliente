@@ -1,10 +1,14 @@
-"""Models de pedidos: Order (o pedido) e OrderItem (cada peça do pedido)."""
+"""Models de pedidos: Order (o pedido), OrderItem (cada peça) e ShippingRate (frete por UF)."""
 
+from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
-from django.db.models import F
+from django.db.models import F, Q
+from django.utils import timezone
 
 from loja.models import ProductVariant
 
@@ -17,23 +21,58 @@ STATE_CHOICES = [
     ]
 ]
 
+# Por quanto tempo, depois do envio, o pedido ainda conta como "ativo"
+# (decisão 92): a entrega pode estar a caminho e o prazo de desistência do
+# CDC (7 dias APÓS o recebimento) pode estar correndo. Pergunta à dona.
+SHIPPED_ACTIVE_PERIOD = timedelta(days=30)
+
 
 class Order(models.Model):
-    """Pedido feito pelo site. O pagamento é combinado pelo WhatsApp."""
+    """Pedido feito pelo site, sempre ligado à conta da cliente (v2 Etapa 5)."""
 
     class Status(models.TextChoices):
         """Situações do pedido. O 1º valor vai para o banco; o 2º aparece na tela."""
 
-        NEW = 'novo', 'Novo'
-        CONFIRMED = 'confirmado', 'Confirmado'
-        SHIPPED = 'enviado', 'Enviado'
+        AWAITING_PAYMENT = 'aguardando_pagamento', 'Aguardando pagamento'
+        PAID = 'pago', 'Pago'
+        EXPIRED = 'expirado', 'Expirado'
         CANCELLED = 'cancelado', 'Cancelado'
+        SHIPPED = 'enviado', 'Enviado'
+        REFUNDED = 'estornado', 'Estornado'
 
-    # Dados da cliente: só o necessário para entregar (LGPD).
+    # Tabela de transições permitidas (decisão 87): {status atual: {para onde pode ir}}.
+    # Um status que não leva a lugar nenhum (conjunto vazio) é FINAL.
+    # "Pago" só é alcançado pela confirmação do gateway (Etapas 7 e 8): nenhuma
+    # tela do admin oferece essa opção.
+    ALLOWED_TRANSITIONS = {
+        Status.AWAITING_PAYMENT: {Status.PAID, Status.EXPIRED, Status.CANCELLED},
+        Status.PAID: {Status.SHIPPED, Status.REFUNDED},
+        Status.SHIPPED: {Status.REFUNDED},
+        Status.EXPIRED: set(),
+        Status.CANCELLED: set(),
+        Status.REFUNDED: set(),
+    }
+
+    # Transições que devolvem as peças ao estoque. Estorno de pedido ENVIADO
+    # não está aqui: a peça ainda está com a cliente, e só volta ao estoque
+    # quando chegar e for conferida (a dona ajusta no admin).
+    STOCK_RETURNING_TRANSITIONS = {
+        (Status.AWAITING_PAYMENT, Status.EXPIRED),
+        (Status.AWAITING_PAYMENT, Status.CANCELLED),
+        (Status.PAID, Status.REFUNDED),
+    }
+
+    # Dona do pedido. PROTECT: o banco recusa apagar uma conta que tem pedido
+    # (o caminho é anonimizar a conta, decisão 78). null=True SÓ para os
+    # pedidos da v1, feitos sem conta (decisão 86); todo pedido novo tem dona.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='orders', verbose_name='conta',
+    )
+
+    # Dados de entrega: só o necessário para entregar (LGPD).
     customer_name = models.CharField('nome', max_length=120)
     phone = models.CharField('telefone/WhatsApp', max_length=11, help_text='Só dígitos, com DDD.')
-
-    # Endereço de entrega.
     cep = models.CharField('CEP', max_length=8, help_text='Só dígitos.')
     street = models.CharField('rua', max_length=150)
     number = models.CharField('número', max_length=20)
@@ -43,12 +82,19 @@ class Order(models.Model):
     state = models.CharField('UF', max_length=2, choices=STATE_CHOICES)
 
     status = models.CharField(
-        'status', max_length=10, choices=Status.choices, default=Status.NEW
+        'status', max_length=20, choices=Status.choices, default=Status.AWAITING_PAYMENT
     )
-    # Frete: vazio na v1 ("a combinar"). Já existe para a v2 calcular sem refatorar.
+    # Frete calculado no momento da compra (decisão 90). Fica gravado: se a
+    # tabela de frete mudar depois, o pedido continua com o valor cobrado.
+    # Vazio só nos pedidos da v1 ("frete a combinar").
     shipping_cost = models.DecimalField(
         'frete (R$)', max_digits=8, decimal_places=2, null=True, blank=True
     )
+    # Até quando as peças ficam reservadas esperando o pagamento (decisão 88).
+    # Vazio = nunca expira sozinho (pedidos da v1).
+    expires_at = models.DateTimeField('reservado até', null=True, blank=True)
+    # Quando virou "enviado" (usado para saber se o pedido ainda é "ativo").
+    shipped_at = models.DateTimeField('enviado em', null=True, blank=True)
     created_at = models.DateTimeField('criado em', auto_now_add=True)
     updated_at = models.DateTimeField('atualizado em', auto_now=True)
 
@@ -56,6 +102,9 @@ class Order(models.Model):
         verbose_name = 'pedido'
         verbose_name_plural = 'pedidos'
         ordering = ['-created_at']
+        # Índice: deixa rápida a busca "pedidos aguardando com prazo vencido",
+        # feita a cada visita à página de produto e pelo comando expirar_pedidos.
+        indexes = [models.Index(fields=['status', 'expires_at'], name='order_status_expires_idx')]
 
     def __str__(self):
         return f'Pedido nº {self.pk}'
@@ -69,7 +118,7 @@ class Order(models.Model):
 
     @property
     def total(self):
-        """Itens + frete (quando a loja informar o frete)."""
+        """Itens + frete."""
         return self.items_total + (self.shipping_cost or Decimal('0'))
 
     # --- Regras de status ----------------------------------------------------
@@ -78,9 +127,10 @@ class Order(models.Model):
         """Status que está salvo no banco agora (None se o pedido é novo).
 
         lock=True usa select_for_update(): trava a linha do pedido até o fim da
-        transação. Se duas pessoas cancelarem ao mesmo tempo, a segunda espera
-        a primeira terminar e já enxerga "cancelado" (o estoque não volta em
-        dobro). Só funciona dentro de transaction.atomic().
+        transação. Se duas requisições mudarem o status ao mesmo tempo (ex.: o
+        comando de expiração e a confirmação do pagamento), a segunda ESPERA a
+        primeira terminar e já enxerga o status novo. Assim o estoque nunca
+        volta em dobro. Só funciona dentro de transaction.atomic().
         """
         if self.pk is None:
             return None
@@ -89,35 +139,47 @@ class Order(models.Model):
             orders = orders.select_for_update()
         return orders.values_list('status', flat=True).first()
 
-    def check_not_reopening(self, old_status):
-        """Cancelado é final: não pode voltar para outro status."""
-        if old_status == self.Status.CANCELLED and self.status != self.Status.CANCELLED:
+    @classmethod
+    def can_change(cls, old_status, new_status):
+        """Diz se a transição old_status -> new_status é permitida.
+
+        Ficar no mesmo status é sempre permitido (ex.: a dona corrige o
+        endereço sem mexer no status).
+        """
+        if old_status == new_status:
+            return True
+        return new_status in cls.ALLOWED_TRANSITIONS.get(old_status, set())
+
+    def check_transition(self, old_status):
+        """Lança ValidationError se a mudança de status não é permitida."""
+        if old_status is None:
+            return  # pedido sendo criado agora
+        if not self.can_change(old_status, self.status):
+            old_label = self.Status(old_status).label
+            new_label = self.Status(self.status).label
             raise ValidationError(
-                {'status': 'Pedido cancelado não pode ser reaberto. Faça um pedido novo.'}
+                {'status': f'Não é possível passar de "{old_label}" para "{new_label}".'}
             )
 
     def clean(self):
         """Validação usada pelos formulários (inclusive o admin)."""
-        self.check_not_reopening(self.status_in_database())
+        self.check_transition(self.status_in_database())
 
     def save(self, *args, **kwargs):
-        """Salva o pedido. Se ele ACABOU de ser cancelado, devolve o estoque.
+        """Salva o pedido aplicando a tabela de transições.
 
         A regra fica aqui (e não só no admin) para valer em qualquer caminho:
-        página do pedido no admin, listagem editável, ação em massa ou shell.
+        admin, comando de expiração, shell e, nas Etapas 7 e 8, o webhook.
         transaction.atomic(): mudar o status e devolver o estoque acontecem
         juntos; se algo falhar no meio, nada é gravado.
         """
         with transaction.atomic():
             old_status = self.status_in_database(lock=True)
-            self.check_not_reopening(old_status)
-            being_cancelled = (
-                old_status is not None
-                and old_status != self.Status.CANCELLED
-                and self.status == self.Status.CANCELLED
-            )
+            self.check_transition(old_status)
+            if old_status != self.Status.SHIPPED and self.status == self.Status.SHIPPED:
+                self.shipped_at = timezone.now()
             super().save(*args, **kwargs)
-            if being_cancelled:
+            if (old_status, self.status) in self.STOCK_RETURNING_TRANSITIONS:
                 self.restore_stock()
 
     def restore_stock(self):
@@ -126,12 +188,40 @@ class Order(models.Model):
         F('stock') + quantidade: o próprio banco soma, em vez de o Python ler o
         valor, somar e gravar. Assim não perdemos uma alteração feita por outra
         pessoa ao mesmo tempo.
+
+        order_by('variant_id'): todos os caminhos tocam as variações na MESMA
+        ordem (menor id primeiro). Se dois processos devolvessem estoque em
+        ordens opostas (A depois B / B depois A), cada um poderia ficar
+        esperando a trava do outro para sempre: um "deadlock".
         """
-        for item in self.items.all():
+        for item in self.items.order_by('variant_id'):
             if item.variant_id:  # a variação pode ter sido apagada (SET_NULL)
                 ProductVariant.objects.filter(pk=item.variant_id).update(
                     stock=F('stock') + item.quantity
                 )
+
+    # --- Exibição ------------------------------------------------------------
+
+    @property
+    def is_awaiting_payment(self):
+        """Atalho para os templates."""
+        return self.status == self.Status.AWAITING_PAYMENT
+
+
+def active_orders(user, now=None):
+    """Pedidos "ativos" da conta: ainda há algo a fazer com eles (decisão 92).
+
+    - aguardando pagamento (peças reservadas, pagamento em curso);
+    - pago (a loja ainda vai entregar);
+    - enviado há menos de SHIPPED_ACTIVE_PERIOD (entrega ou desistência em curso).
+
+    Q() junta condições com "ou" (|). Sem Q, o filter() só sabe fazer "e".
+    """
+    now = now or timezone.now()
+    return user.orders.filter(
+        Q(status__in=[Order.Status.AWAITING_PAYMENT, Order.Status.PAID])
+        | Q(status=Order.Status.SHIPPED, shipped_at__gt=now - SHIPPED_ACTIVE_PERIOD)
+    )
 
 
 class OrderItem(models.Model):
@@ -145,7 +235,7 @@ class OrderItem(models.Model):
         Order, on_delete=models.CASCADE, related_name='items', verbose_name='pedido'
     )
     # SET_NULL: se a variação for apagada, o item continua no histórico.
-    # O vínculo serve para devolver o estoque ao cancelar.
+    # O vínculo serve para devolver o estoque ao cancelar ou expirar.
     variant = models.ForeignKey(
         ProductVariant, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='order_items', verbose_name='variação',
@@ -166,3 +256,40 @@ class OrderItem(models.Model):
     def subtotal(self):
         """Preço unitário x quantidade."""
         return self.unit_price * self.quantity
+
+
+class ShippingRate(models.Model):
+    """Preço do frete para uma UF, editável no admin (decisão 90).
+
+    UF sem linha nesta tabela = a loja ainda não entrega lá (o checkout recusa).
+    """
+
+    class Region(models.TextChoices):
+        """Regiões do Brasil, só para filtrar e agrupar no admin."""
+
+        NORTE = 'norte', 'Norte'
+        NORDESTE = 'nordeste', 'Nordeste'
+        CENTRO_OESTE = 'centro_oeste', 'Centro-Oeste'
+        SUDESTE = 'sudeste', 'Sudeste'
+        SUL = 'sul', 'Sul'
+
+    state = models.CharField('UF', max_length=2, choices=STATE_CHOICES, unique=True)
+    region = models.CharField('região', max_length=12, choices=Region.choices)
+    price = models.DecimalField(
+        'frete (R$)', max_digits=8, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    # Os valores iniciais são EXEMPLOS (decisão 54). A dona desmarca ao
+    # confirmar o valor real; o admin mostra um aviso enquanto houver algum.
+    is_provisional = models.BooleanField(
+        'PROVISÓRIO', default=True,
+        help_text='Valor de exemplo. Desmarque quando a dona confirmar o valor real.',
+    )
+
+    class Meta:
+        verbose_name = 'frete por UF'
+        verbose_name_plural = 'fretes por UF'
+        ordering = ['region', 'state']
+
+    def __str__(self):
+        return f'{self.state}: R$ {self.price}'

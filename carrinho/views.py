@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from loja.models import ProductVariant
 from loja.views import active_products
+from pedidos.reservations import expire_overdue_orders
 
 from .cart import Cart
 from .forms import AddToCartForm, UpdateQuantityForm, first_error
@@ -39,6 +40,8 @@ def cart_detail(request):
 @require_POST
 def cart_add(request, product_id):
     """Adiciona um tamanho de um produto ao carrinho."""
+    # Libera reservas vencidas antes de conferir o estoque (decisão 88).
+    expire_overdue_orders()
     product = get_object_or_404(active_products(), id=product_id)
     form = AddToCartForm(request.POST, product=product)
 

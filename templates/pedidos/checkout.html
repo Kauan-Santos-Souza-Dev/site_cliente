@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load l10n %}
 {# Checkout: dados da cliente + resumo do carrinho (view pedidos.views.checkout). #}
 
 {% block title %}Finalizar pedido — Elegância Cristã{% endblock %}
@@ -45,11 +46,12 @@
         {# Aviso exigido pela LGPD: para que os dados serão usados. #}
         <p class="aviso-lgpd">
           Usamos seus dados apenas para registrar e entregar o pedido e para falar com você
-          pelo WhatsApp sobre frete e pagamento. Saiba mais na
+          sobre ele. O pedido fica guardado na sua conta, em "Meus pedidos". Saiba mais na
           <a href="{% url 'privacy' %}">Política de Privacidade</a>.
         </p>
 
         <button class="botao botao--largo" type="submit">Confirmar pedido</button>
+        <p class="campo__dica checkout__dica">As peças ficam reservadas por um tempo para você pagar. Se o pagamento não acontecer, o pedido expira e as peças voltam para a loja.</p>
       </form>
 
       <aside class="checkout__resumo" aria-labelledby="resumo-titulo">
@@ -62,8 +64,29 @@
           </li>
           {% endfor %}
         </ul>
-        <p class="carrinho__total">Total: <strong>R$ {{ total }}</strong></p>
-        <p class="produto__frete">Frete a combinar pelo WhatsApp. O pagamento (Pix etc.) também é combinado na conversa.</p>
+        {% comment %}
+          Frete: depende da UF. O JavaScript (ativarFreteCheckout, em main.js)
+          lê a tabela do <script id="tabela-frete"> e atualiza as linhas abaixo
+          ao escolher a UF. Sem JavaScript, a tabela aparece no <details>.
+          O valor cobrado é SEMPRE o calculado de novo pelo servidor.
+        {% endcomment %}
+        <dl class="dados checkout__totais" aria-live="polite" data-total-produtos="{{ items_total|unlocalize }}">
+          <dt>Produtos</dt>
+          <dd>R$ {{ items_total }}</dd>
+          <dt>Frete</dt>
+          <dd id="frete-valor">escolha a UF</dd>
+          <dt>Total</dt>
+          <dd><strong id="total-valor">R$ {{ items_total }} + frete</strong></dd>
+        </dl>
+        <details class="checkout__tabela-frete">
+          <summary>Ver tabela de frete</summary>
+          {% if free_shipping_threshold %}<p>Frete grátis em compras a partir de R$ {{ free_shipping_threshold }} (soma dos produtos).</p>{% endif %}
+          <ul class="lista-simples">
+            {% for rate in shipping_rates %}<li>{{ rate.state }}: R$ {{ rate.price }}</li>{% endfor %}
+          </ul>
+        </details>
+        {# json_script: entrega os dados ao JavaScript com segurança (escapa tudo, sem risco de injetar código). #}
+        {{ shipping_table|json_script:"tabela-frete" }}
         <p><a href="{% url 'cart_detail' %}">← Voltar ao carrinho</a></p>
       </aside>
     </div>

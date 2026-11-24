@@ -56,7 +56,7 @@
           </tr>
           <tr>
             <td>Nome, telefone/WhatsApp e endereço de entrega do pedido</td>
-            <td>Separar, entregar e conversar com você sobre o pedido.</td>
+            <td>Separar, entregar e conversar com você sobre o pedido. O pedido fica ligado à sua conta, e você o acompanha em "Meus pedidos". O valor do frete e dos produtos também fica guardado.</td>
             <td>Execução de contrato (art. 7º, V)</td>
           </tr>
           <tr>
@@ -126,11 +126,11 @@
     <h2>7. Seus direitos</h2>
     <p>Pela LGPD (art. 18), você pode: confirmar se tratamos seus dados, ter acesso a eles, corrigi-los, pedir a anonimização ou a exclusão do que não for necessário, receber uma cópia (portabilidade), saber com quem compartilhamos e revogar o consentimento, quando ele for a base do tratamento.</p>
     <ul class="lista-simples">
-      <li>Na página <a href="{% url 'account' %}">Minha conta</a> você mesma vê e corrige seus dados, troca o e-mail e a senha, baixa uma cópia dos dados (arquivo JSON) e exclui a conta.</li>
+      <li>Na página <a href="{% url 'account' %}">Minha conta</a> você mesma vê e corrige seus dados, troca o e-mail e a senha, baixa uma cópia dos dados (arquivo JSON, com os seus pedidos) e exclui a conta.</li>
       <li>Para qualquer outro pedido, escreva para <a href="mailto:{{ CONTACT_EMAIL }}">{{ CONTACT_EMAIL }}</a>. Respondemos em até 15 dias (LGPD, art. 19, II).</li>
       <li>Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD).</li>
     </ul>
-    <p><strong>Excluir a conta</strong> apaga seu nome e seu e-mail na hora. Os pedidos já feitos continuam registrados pelo prazo da seção 5, porque a loja pode precisar deles para responder a uma reclamação.</p>
+    <p><strong>Excluir a conta</strong> apaga seu nome e seu e-mail na hora. Os pedidos já feitos continuam registrados pelo prazo da seção 5, porque a loja pode precisar deles para responder a uma reclamação. Enquanto houver pedido em andamento (aguardando pagamento, pago ou enviado há menos de {{ shipped_active_days }} dias), a exclusão espera: a loja ainda precisa da conta para entregar, devolver o dinheiro ou falar com você.</p>
 
     <h2>8. Mudanças nesta política</h2>
     <p>Quando esta política mudar, a versão no topo da página muda também. Guardamos qual versão você aceitou no cadastro.</p>

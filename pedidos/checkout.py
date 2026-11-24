@@ -1,36 +1,48 @@
-"""Transforma o carrinho em pedido (Order + OrderItem) e desconta o estoque."""
+"""Transforma o carrinho em pedido (Order + OrderItem), desconta o estoque e calcula o frete."""
+
+from datetime import timedelta
+from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 
 from carrinho.cart import Cart
-from loja.models import ProductVariant
+from loja.models import ProductVariant, StoreSettings
 
-from .models import OrderItem
+from .models import Order, OrderItem
+from .shipping import calculate_shipping
 
 
 class OutOfStockError(Exception):
     """Algum item do carrinho não tem mais estoque suficiente."""
 
 
-def create_order(cart, form):
-    """Cria o pedido a partir do carrinho e do formulário de checkout válido.
+def create_order(cart, form, user):
+    """Cria o pedido da conta `user` a partir do carrinho e do formulário válido.
 
-    Devolve o Order criado, ou lança OutOfStockError (e nada é salvo).
+    Devolve o Order criado, ou lança OutOfStockError / ShippingUnavailableError
+    (e nada é salvo).
+
+    O pedido nasce "aguardando pagamento", com as peças RESERVADAS (estoque já
+    descontado) até expires_at (decisão 88).
 
     transaction.atomic(): tudo aqui dentro é uma única transação no banco.
     Ou TUDO é gravado (pedido, itens e estoque descontado), ou NADA é.
     Se lançarmos um erro no meio, o Django desfaz o que já tinha feito
-    (rollback) — não sobra pedido sem itens, nem estoque descontado à toa.
+    (rollback): não sobra pedido sem itens, nem estoque descontado à toa.
     """
     with transaction.atomic():
         # select_for_update(): TRAVA as linhas destas variações até o fim da
         # transação. Se outra cliente estiver finalizando um pedido com a mesma
         # peça, ela espera esta transação terminar e então lê o estoque já
         # atualizado. Sem a trava, as duas poderiam comprar a última peça.
+        # order_by('pk'): trava sempre na mesma ordem (evita deadlock, ver
+        # Order.restore_stock).
         variants = (
             ProductVariant.objects.select_for_update()
             .select_related('product')
             .filter(id__in=cart.data.keys())
+            .order_by('pk')
         )
         variants_by_id = {str(variant.id): variant for variant in variants}
 
@@ -43,10 +55,25 @@ def create_order(cart, form):
             if error:
                 raise OutOfStockError(f'{variant.product.name}: {error}')
 
-        # 2) Grava o pedido com os dados do formulário.
-        order = form.save()
+        # 2) Frete calculado com os preços ATUAIS (os das linhas travadas).
+        #    UF sem frete lança ShippingUnavailableError e desfaz tudo.
+        items_total = sum(
+            (variants_by_id[vid].product.price * qty for vid, qty in cart.data.items()),
+            Decimal('0'),
+        )
+        shipping_cost = calculate_shipping(form.cleaned_data['state'], items_total)
 
-        # 3) Cria os itens, copiando nome, tamanho e PREÇO ATUAL, e desconta o estoque.
+        # 3) Grava o pedido. commit=False: o form monta o Order, mas ainda não
+        #    salva; completamos dona, frete e prazo e só então salvamos.
+        order = form.save(commit=False)
+        order.user = user
+        order.status = Order.Status.AWAITING_PAYMENT
+        order.shipping_cost = shipping_cost
+        minutes = StoreSettings.load().reservation_minutes
+        order.expires_at = timezone.now() + timedelta(minutes=minutes)
+        order.save()
+
+        # 4) Cria os itens, copiando nome, tamanho e PREÇO ATUAL, e desconta o estoque.
         for variant_id, quantity in cart.data.items():
             variant = variants_by_id[variant_id]
             OrderItem.objects.create(

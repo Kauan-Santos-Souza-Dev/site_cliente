@@ -61,6 +61,8 @@
             um link em outro site não consiga deslogar a cliente.
           {% endcomment %}
           {% if user.is_authenticated %}
+            {# "Meus pedidos" (v2 Etapa 5): só os pedidos da conta logada. #}
+            <li><a class="menu__link" href="{% url 'my_orders' %}"{% if atual == 'my_orders' or atual == 'order_detail' %} aria-current="page"{% endif %}>Meus pedidos</a></li>
             <li class="menu__conta">
               {# A saudação leva à página "Minha conta" (v2 Etapa 4). #}
               <a class="menu__link menu__saudacao" href="{% url 'account' %}"{% if atual == 'account' %} aria-current="page"{% endif %}>Olá, {{ user.first_name|default:user.email }} <span class="visualmente-oculto">— Minha conta</span></a>

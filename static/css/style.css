@@ -1068,6 +1068,81 @@ main:focus {
   font-size: 0.95rem;
 }
 
+/* 7.9) Meus pedidos, status e frete no checkout (v2 Etapa 5) --------------- */
+.pedidos {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+/* Cada pedido é um cartão clicável. No celular, as informações quebram em
+   duas linhas; no desktop cabem numa só (flex-wrap). */
+.pedidos__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  color: var(--cor-texto);
+  text-decoration: none;
+}
+.pedidos__link:hover {
+  border-color: var(--cor-principal-escura);
+}
+.pedidos__numero {
+  font-weight: 700;
+  color: var(--cor-principal-escura);
+}
+.pedidos__data {
+  color: var(--cor-texto-suave);
+}
+.pedidos__total {
+  margin-left: auto;
+  font-weight: 700;
+}
+/* Etiqueta de status. O texto sempre diz o status: a cor é só um reforço
+   (quem não distingue cores não perde a informação). */
+.status {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--cor-principal-clara);
+  color: var(--cor-principal-escura);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.status--pago,
+.status--enviado {
+  background: #e5f3ec;
+  color: #0e5e3a;     /* verde escuro: contraste ~7:1 */
+}
+.status--expirado,
+.status--cancelado,
+.status--estornado {
+  background: #f1eff1;
+  color: var(--cor-texto-suave);
+}
+.checkout__dica {
+  margin-top: 0.75rem;
+}
+.checkout__totais {
+  margin-top: 1rem;
+}
+.checkout__tabela-frete {
+  margin-bottom: 1rem;
+}
+.checkout__tabela-frete summary {
+  cursor: pointer;
+  color: var(--cor-principal-escura);
+}
+/* Lista das UFs em colunas, para não ficar com 27 linhas. */
+.checkout__tabela-frete ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+}
+
 /* 7.4) Contato ------------------------------------------------------------- */
 .grade--contato {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -1,8 +1,8 @@
-"""Painel de pedidos para a dona da loja."""
+"""Painel de pedidos e de frete para a dona da loja."""
 
 from django.contrib import admin, messages
 
-from .models import Order, OrderItem
+from .models import Order, OrderItem, ShippingRate
 from .whatsapp import format_brl
 
 
@@ -25,30 +25,42 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    """Lista de pedidos com busca, filtros e troca rápida de status."""
+    """Lista de pedidos com busca, filtros e AÇÕES para mudar o status.
 
-    list_display = ('id', 'customer_name', 'phone', 'created_at', 'total_display', 'status')
+    O status é SÓ LEITURA (decisão 87). Ele muda por ações que respeitam a
+    tabela de transições do model: "Marcar como enviado" e "Cancelar".
+    Não existe "marcar como pago": quem confirma pagamento é o gateway
+    (Etapas 7 e 8). Assim nenhum clique por engano vira "pago".
+    """
+
+    list_display = ('id', 'customer_name', 'user', 'created_at', 'total_display', 'status', 'expires_at')
     list_display_links = ('id', 'customer_name')
-    # Muda o status direto na lista. O Order.save() devolve o estoque ao cancelar,
-    # e o Order.clean() impede reabrir um pedido cancelado.
-    list_editable = ('status',)
     list_filter = ('status', 'created_at')
-    search_fields = ('id', 'customer_name', 'phone')
+    # user__email: busca pelo e-mail da conta (o "__" atravessa a ligação).
+    search_fields = ('id', 'customer_name', 'phone', 'user__email')
     # Sem date_hierarchy: ele usa CONVERT_TZ do MySQL, que exige as tabelas de
     # fuso horário instaladas no servidor (no Windows elas não vêm). O filtro
     # lateral por data acima funciona sem isso. Ver DECISIONS.md.
-    readonly_fields = ('created_at', 'updated_at', 'total_display')
+    readonly_fields = (
+        'user', 'status', 'shipping_cost', 'total_display',
+        'expires_at', 'shipped_at', 'created_at', 'updated_at',
+    )
     inlines = [OrderItemInline]
-    actions = ['cancel_orders']
+    actions = ['mark_shipped', 'cancel_orders']
     fieldsets = (
-        ('Pedido', {'fields': ('status', 'shipping_cost', 'total_display', 'created_at', 'updated_at')}),
-        ('Cliente', {'fields': ('customer_name', 'phone')}),
-        ('Entrega', {'fields': ('cep', 'street', 'number', 'complement', 'neighborhood', 'city', 'state')}),
+        ('Pedido', {'fields': (
+            'user', 'status', 'shipping_cost', 'total_display',
+            'expires_at', 'shipped_at', 'created_at', 'updated_at',
+        )}),
+        ('Entrega', {'fields': (
+            'customer_name', 'phone', 'cep', 'street', 'number',
+            'complement', 'neighborhood', 'city', 'state',
+        )}),
     )
 
     def get_queryset(self, request):
-        # Busca os itens de todos os pedidos da página de uma vez (evita "N+1").
-        return super().get_queryset(request).prefetch_related('items')
+        """Busca conta e itens de uma vez (evita "N+1": uma consulta por pedido)."""
+        return super().get_queryset(request).select_related('user').prefetch_related('items')
 
     @admin.display(description='total')
     def total_display(self, order):
@@ -57,18 +69,20 @@ class OrderAdmin(admin.ModelAdmin):
     # --- Permissões ----------------------------------------------------------
 
     def has_add_permission(self, request):
-        """Pedidos nascem só pelo site: só o checkout desconta o estoque."""
+        """Pedidos nascem só pelo site: só o checkout reserva o estoque."""
         return False
 
     def has_delete_permission(self, request, obj=None):
-        """Só apaga pedido cancelado ou enviado.
+        """Só apaga pedido cancelado ou expirado.
 
-        Apagar um pedido "novo" ou "confirmado" sumiria com as peças
-        reservadas sem devolvê-las ao estoque. Cancele primeiro.
+        Esses nunca foram pagos e o estoque já voltou. Pedidos pagos,
+        enviados ou estornados são registro de venda e seguem o prazo de
+        guarda (decisão 79). Apagar um "aguardando pagamento" sumiria com as
+        peças reservadas sem devolvê-las.
         """
         if obj is None:
             return super().has_delete_permission(request)
-        return obj.status in (Order.Status.CANCELLED, Order.Status.SHIPPED)
+        return obj.status in (Order.Status.CANCELLED, Order.Status.EXPIRED)
 
     def get_actions(self, request):
         """Remove a exclusão em massa padrão, que ignoraria a regra acima."""
@@ -78,12 +92,55 @@ class OrderAdmin(admin.ModelAdmin):
 
     # --- Ações em massa ------------------------------------------------------
 
-    @admin.action(description='Cancelar pedidos selecionados (devolve o estoque)')
+    def change_status(self, request, queryset, new_status):
+        """Muda o status de cada pedido que PODE ir para new_status.
+
+        Um por um, para cada save() aplicar a regra (trava, transição e
+        estoque). Os que não podem (ex.: enviar um pedido não pago) são
+        pulados e contados na mensagem.
+        """
+        changed = skipped = 0
+        for order in queryset:
+            if Order.can_change(order.status, new_status) and order.status != new_status:
+                order.status = new_status
+                order.save()
+                changed += 1
+            else:
+                skipped += 1
+        label = Order.Status(new_status).label.lower()
+        self.message_user(request, f'{changed} pedido(s) marcado(s) como "{label}".', messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                f'{skipped} pedido(s) pulado(s): o status atual não permite essa mudança.',
+                messages.WARNING,
+            )
+
+    @admin.action(description='Marcar como enviado (só pedidos pagos)')
+    def mark_shipped(self, request, queryset):
+        self.change_status(request, queryset, Order.Status.SHIPPED)
+
+    @admin.action(description='Cancelar (só aguardando pagamento; devolve o estoque)')
     def cancel_orders(self, request, queryset):
-        """Cancela um por um, para cada save() devolver o estoque do pedido."""
-        cancelled = 0
-        for order in queryset.exclude(status=Order.Status.CANCELLED):
-            order.status = Order.Status.CANCELLED
-            order.save()
-            cancelled += 1
-        self.message_user(request, f'{cancelled} pedido(s) cancelado(s).', messages.SUCCESS)
+        self.change_status(request, queryset, Order.Status.CANCELLED)
+
+
+@admin.register(ShippingRate)
+class ShippingRateAdmin(admin.ModelAdmin):
+    """Tabela de frete por UF (decisão 90). Preço editável direto na lista."""
+
+    list_display = ('state', 'region', 'price', 'is_provisional')
+    list_editable = ('price', 'is_provisional')
+    list_filter = ('region', 'is_provisional')
+
+    def changelist_view(self, request, extra_context=None):
+        """Mostra um aviso no topo enquanto houver valor PROVISÓRIO."""
+        provisional = ShippingRate.objects.filter(is_provisional=True).count()
+        if provisional:
+            self.message_user(
+                request,
+                f'{provisional} UF(s) com frete PROVISÓRIO (valor de exemplo). '
+                'Confirme os valores reais com a dona e desmarque "PROVISÓRIO".',
+                messages.WARNING,
+            )
+        return super().changelist_view(request, extra_context)

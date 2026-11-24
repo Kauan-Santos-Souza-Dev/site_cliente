@@ -10,6 +10,8 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 
 from contas import legal
+from pedidos.models import SHIPPED_ACTIVE_PERIOD
+from pedidos.reservations import expire_overdue_orders
 
 from .models import Category, Product
 
@@ -77,6 +79,10 @@ def catalog(request):
 
 def product_detail(request, slug):
     """Página de um produto: fotos, preço, descrição e tamanhos."""
+    # Expiração "preguiçosa" (decisão 88): antes de mostrar os tamanhos,
+    # devolve ao estoque as peças de pedidos não pagos com a reserva vencida.
+    # No caso comum (nada vencido) é uma única consulta rápida.
+    expire_overdue_orders()
     # Produto inativo também dá 404: para o cliente, ele "não existe".
     product = get_object_or_404(active_products(), slug=slug)
     context = {
@@ -118,4 +124,5 @@ def legal_context():
         'order_retention_years': legal.ORDER_RETENTION.days // 365,
         'unverified_days': legal.UNVERIFIED_ACCOUNT_RETENTION.days,
         'login_attempt_days': legal.LOGIN_ATTEMPT_RETENTION.days,
+        'shipped_active_days': SHIPPED_ACTIVE_PERIOD.days,
     }

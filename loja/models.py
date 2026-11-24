@@ -1,5 +1,8 @@
-"""Models do catálogo: categoria, produto, variação de tamanho e imagem."""
+"""Models do catálogo (categoria, produto, variação de tamanho, imagem) e a configuração da loja."""
 
+from decimal import Decimal
+
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
 
@@ -144,3 +147,52 @@ class ProductImage(models.Model):
             ProductImage.objects.filter(product=self.product).exclude(
                 pk=self.pk
             ).update(is_main=False)
+
+
+class StoreSettings(models.Model):
+    """Configurações gerais da loja, editáveis no admin (v2 Etapa 5, decisão 89).
+
+    É um "singleton": existe UMA linha só (id=1). Em vez de valores fixos no
+    código, a dona muda no admin, sem precisar de programador. Use sempre
+    StoreSettings.load() para ler.
+
+    A v2 Etapa 6 acrescenta aqui as regras de parcelamento.
+    """
+
+    # Quanto tempo as peças ficam reservadas para um pedido não pago (decisão 58).
+    reservation_minutes = models.PositiveIntegerField(
+        'reserva do estoque (minutos)',
+        default=30,
+        validators=[MinValueValidator(5), MaxValueValidator(24 * 60)],
+        help_text='Tempo para pagar. Depois disso o pedido expira e as peças voltam ao estoque. '
+                  'Entre 5 e 1440 minutos.',
+    )
+    # Frete grátis a partir deste valor em produtos (decisão 54). Vazio = nunca grátis.
+    free_shipping_threshold = models.DecimalField(
+        'frete grátis a partir de (R$)',
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text='Soma dos produtos (sem frete). Deixe vazio para não ter frete grátis.',
+    )
+    free_shipping_is_provisional = models.BooleanField(
+        'valor do frete grátis é PROVISÓRIO', default=True,
+        help_text='Desmarque quando a dona confirmar o valor real.',
+    )
+
+    class Meta:
+        verbose_name = 'configuração da loja'
+        verbose_name_plural = 'configuração da loja'
+
+    def __str__(self):
+        return 'Configuração da loja'
+
+    def save(self, *args, **kwargs):
+        """Força o id 1: nunca existe uma segunda linha de configuração."""
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        """Devolve a configuração (cria com os valores padrão se ainda não existir)."""
+        settings_row, _created = cls.objects.get_or_create(pk=1)
+        return settings_row

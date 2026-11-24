@@ -27,6 +27,9 @@
       <li><a href="{% url 'password_change' %}">Trocar senha</a></li>
     </ul>
 
+    <h2>Pedidos</h2>
+    <p><a href="{% url 'my_orders' %}">Ver meus pedidos</a></p>
+
     <h2>Termos aceitos</h2>
     {% if consents %}
       <ul class="lista-simples">
@@ -39,7 +42,7 @@
     {% endif %}
 
     <h2>Seus direitos (LGPD)</h2>
-    <p>Você pode baixar uma cópia dos seus dados ou excluir a sua conta. Veja como cuidamos dos seus dados na <a href="{% url 'privacy' %}">Política de Privacidade</a>.</p>
+    <p>Você pode baixar uma cópia dos seus dados (inclusive os pedidos) ou excluir a sua conta. Veja como cuidamos dos seus dados na <a href="{% url 'privacy' %}">Política de Privacidade</a>.</p>
 
     {# POST com CSRF: um link em outro site não consegue disparar o download com a sessão da cliente. #}
     <form method="post" action="{% url 'account_export' %}">

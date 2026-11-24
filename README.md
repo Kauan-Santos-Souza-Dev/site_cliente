@@ -4,8 +4,9 @@ Site de uma loja de roupas femininas (vestidos, saias e conjuntos) com temática
 Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, Django e Django REST Framework.
 
 > Status: **v1 concluída** (etapas 1 a 8, tag `v1.0`). **v2 em desenvolvimento** na branch `v2`
-> (pagamento online, contas de clientes e parcelamento): etapas 1 a 3 de 9 concluídas.
-> ⚠️ **A v2 ainda não pode ir ao ar** (faltam LGPD, pagamento e a revisão final; o e-mail ainda sai só no console).
+> (pagamento online, contas de clientes e parcelamento): etapas 1 a 5 de 9 concluídas.
+> ⚠️ **A v2 ainda não pode ir ao ar** (faltam o pagamento e a revisão final; o e-mail ainda sai só no console;
+> o frete tem valores provisórios).
 > O roteiro completo está no [CLAUDE.md](CLAUDE.md) e as decisões técnicas em [DECISIONS.md](DECISIONS.md).
 
 ## Versões
@@ -84,6 +85,14 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
   `python manage.py configurar_2fa seu-email@exemplo.com --redefinir` (apaga o 2FA antigo e cria um novo).
 - **Bloqueada por tentativas erradas** (15 minutos): espere, ou rode `python manage.py axes_reset`.
 
+### Backup antes de migrar
+No MySQL, uma migration que falha no meio **não** desfaz as mudanças de tabela que já fez. Antes de um
+`migrate` que mexe em tabelas com dados (ex.: a v2 Etapa 5, que liga o pedido à conta), faça uma cópia:
+```powershell
+& "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe" -u elegancia -p --single-transaction --no-tablespaces elegancia_crista > backup.sql
+```
+(o `-p` pede a senha no terminal; o arquivo `backup.sql` tem dados pessoais: guarde fora do projeto e apague quando não precisar mais).
+
 ### Recriar o banco de desenvolvimento
 Necessário uma vez, ao passar da v1 para a v2: a troca do modelo de usuário (v2 etapa 2, decisão 64)
 não funciona num banco que já tem as tabelas da v1. **Apaga todos os dados**, use só em desenvolvimento.
@@ -128,7 +137,7 @@ PROJETO/
 │   ├── admin.py       # admin de usuários adaptado ao e-mail
 │   ├── test_utils.py  # ajudantes dos testes (conta verificada, login no admin com 2FA)
 │   └── management/commands/  # configurar_2fa, criar_grupos, limpar_dados_antigos
-├── loja/            # catálogo: models, views, urls, admin, validadores, testes
+├── loja/            # catálogo e StoreSettings (configuração da loja): models, views, urls, admin, testes
 │   ├── serializers.py # API: models → JSON
 │   ├── api_views.py   # API: endpoints de leitura
 │   ├── api_urls.py    # API: rotas sob /api/
@@ -138,14 +147,17 @@ PROJETO/
 │   ├── forms.py       # validação de tamanho e quantidade
 │   ├── views.py       # ver, adicionar, atualizar, remover
 │   └── context_processors.py  # contador de peças no menu
-├── pedidos/         # pedido, checkout e WhatsApp
-│   ├── models.py      # Order e OrderItem (regra de cancelamento no save)
-│   ├── checkout.py    # create_order: carrinho -> pedido (transaction.atomic)
-│   ├── whatsapp.py    # mensagem do pedido e link wa.me
+├── pedidos/         # pedido, checkout, frete, reserva de estoque e Meus pedidos
+│   ├── models.py      # Order (conta, status e transições), OrderItem, ShippingRate, active_orders
+│   ├── checkout.py    # create_order: carrinho -> pedido com frete e reserva (transaction.atomic)
+│   ├── shipping.py    # calculate_shipping: tabela por UF + frete grátis
+│   ├── reservations.py # expira pedidos não pagos e devolve o estoque
+│   ├── whatsapp.py    # format_brl e link wa.me "falar sobre o pedido"
 │   ├── forms.py       # CheckoutForm (telefone e CEP só com dígitos)
-│   ├── views.py       # checkout e confirmação
+│   ├── views.py       # checkout, Meus pedidos e detalhe do pedido
 │   ├── rate_limit.py  # limite de pedidos por IP (anti-robô)
-│   └── admin.py       # painel de pedidos
+│   ├── admin.py       # painel de pedidos (ações de status) e tabela de frete
+│   └── management/commands/expirar_pedidos.py  # para um agendador chamar
 ├── templates/
 │   ├── base.html      # cabeçalho, menu e rodapé de todas as páginas
 │   ├── 404.html       # página "não encontrada" (com DEBUG=False)
@@ -154,7 +166,8 @@ PROJETO/
 │   ├── carrinho/      # cart_detail.html
 │   ├── contas/        # login, cadastro, verificação, senha, bloqueio, Minha conta (account*)
 │   │   └── email/     # textos dos e-mails (verificação, aviso de cadastro, nova senha, troca de e-mail)
-│   └── pedidos/       # checkout, confirmation e _campo.html (campo com rótulo e erro)
+│   ├── pedidos/       # checkout, my_orders, order_detail e _campo.html (campo com rótulo e erro)
+│   └── admin/contas/  # anonymize_confirmation.html (confirmação da ação "Anonimizar contas")
 ├── static/
 │   ├── css/style.css  # todo o visual do site
 │   ├── js/main.js     # menu mobile, animações de scroll e aviso de cookies
@@ -296,6 +309,9 @@ Exemplo (`/api/produtos/vestido-helena/`, resumido):
 - Só dá para apagar pedido cancelado ou enviado (apagar um pedido novo sumiria com as peças reservadas).
 - O campo *frete* existe, mas fica vazio na v1 (frete a combinar).
 
+> **Mudou na v2 Etapa 5:** o checkout exige conta, calcula o frete e leva ao detalhe do pedido (não há mais
+> `/pedido/confirmado/`); os status e as ações do admin são outros. Veja "Pedidos na v2" abaixo.
+
 ### Contas (app `contas/`) — v2 etapa 2
 | Endereço | View | O que faz |
 |---|---|---|
@@ -317,7 +333,7 @@ POST /conta/cadastro/  →  config/urls.py ('conta/')  →  contas/urls.py ('cad
 - Login errado mostra sempre "E-mail ou senha incorretos", exista o e-mail ou não.
 - **Carrinho:** montado como visitante, continua depois do login e do cadastro; é apagado no logout.
 - **Admin → Contas → Usuários:** lista com e-mail, nome, ativo, equipe e data de cadastro; busca por e-mail ou nome.
-- Ainda não existe: pedido ligado à conta e "Meus pedidos" (etapa 5).
+- Pedido ligado à conta e "Meus pedidos": v2 Etapa 5.
 
 > **Mudou na etapa 3:** o cadastro não faz mais login automático e mostra sempre "Confira seu e-mail" (veja abaixo).
 
@@ -429,6 +445,7 @@ POST /conta/minha-conta/exportar/ (CSRF) → contas/views.py::account_export (@l
 ```
 POST /conta/minha-conta/excluir/ → contas/views.py::account_delete (@login_required)
   → is_staff? → recusa (a dona não tranca o admin)
+  → pedido ativo? (pedidos/models.py::active_orders, v2 Etapa 5) → página explica, nada muda
   → DeleteAccountForm: senha atual + caixa "entendo que é definitivo"
   → contas/privacy.py::anonymize_user, dentro de transaction.atomic():
        e-mail → anonimizada-<id>@anonimizado.invalid, nome vazio, senha inutilizável,
@@ -461,6 +478,75 @@ GET de qualquer página → templates/base.html: <div id="aviso-cookies" hidden>
 no `.env` → `config/settings.py` → `loja/context_processors.py::store_info` → Política, Termos e rodapé.
 Vazias, mostram "[A DEFINIR PELA DONA]" (o rodapé não mostra nada). Nunca coloque CPF nem endereço residencial.
 
+### Pedidos na v2: conta, status, reserva e frete (app `pedidos/`) — v2 etapa 5
+| Endereço | View | O que faz |
+|---|---|---|
+| `/pedido/finalizar/` | `checkout` | Formulário de entrega + resumo com frete; cria o pedido da conta |
+| `/pedido/meus-pedidos/` | `my_orders` | Lista **só** os pedidos da conta logada |
+| `/pedido/meus-pedidos/<id>/` | `order_detail` | Detalhe (status, reserva, itens, frete, entrega); pedido de outra conta = 404 |
+
+**Status e transições** (`Order.ALLOWED_TRANSITIONS`; o `Order.save()` recusa o resto):
+
+| De \ Para | pago | expirado | cancelado | enviado | estornado |
+|---|---|---|---|---|---|
+| **aguardando pagamento** | gateway (Etapas 7/8) | prazo vencido | admin | — | — |
+| **pago** | — | — | — | admin | estorno (Etapa 8) |
+| **enviado** | — | — | — | — | estorno (Etapa 8) |
+| **expirado, cancelado, estornado** | finais | | | | |
+
+O estoque volta em: aguardando → expirado, aguardando → cancelado e pago → estornado. No estorno de pedido
+**enviado**, a peça volta ao estoque pela mão da dona, quando chegar (pergunta pendente).
+
+**Caminho de um checkout:**
+```
+POST /pedido/finalizar/ → config/urls.py → pedidos/urls.py → pedidos/views.py::checkout
+  (@verified_email_required, contas/decorators.py)
+  → reservations.expire_overdue_orders()   libera reservas vencidas antes de conferir o estoque
+  → CheckoutForm.is_valid() (pedidos/forms.py)
+  → checkout.create_order(cart, form, request.user), dentro de transaction.atomic():
+       ProductVariant.select_for_update().order_by('pk')   trava as peças (em ordem de id)
+       Cart.check_stock em cada item                        falta peça → OutOfStockError, nada salvo
+       shipping.calculate_shipping(UF, soma)                ShippingRate + StoreSettings.free_shipping_threshold
+                                                            UF sem frete → ShippingUnavailableError, nada salvo
+       Order(user, status=aguardando_pagamento, shipping_cost, expires_at = agora + reserva)
+       OrderItem (preço congelado) + estoque descontado = RESERVA
+  → carrinho esvaziado → redirect /pedido/meus-pedidos/<id>/ → templates/pedidos/order_detail.html
+```
+
+**Caminho da expiração** (comando ou "preguiçosa"):
+```
+python manage.py expirar_pedidos        (agendador, a cada 5 min)
+GET /produto/<slug>/, POST /carrinho/adicionar/, /pedido/finalizar/, /pedido/meus-pedidos/   (rede de segurança)
+  → pedidos/reservations.py::expire_overdue_orders()
+       overdue_orders(): status=aguardando E expires_at < agora   (índice order_status_expires_idx)
+       para cada um → expire_order(id), em transaction.atomic():
+            Order.select_for_update() + confere DE NOVO aguardando e vencido
+               não está mais? (pago ou já expirado por outro processo) → não faz nada
+               está → status = expirado → Order.save() → restore_stock(): F('stock') + qtd
+```
+
+**Caminho de "Meus pedidos" (contra IDOR):**
+```
+GET /pedido/meus-pedidos/7/ → pedidos/urls.py → views.order_detail (@login_required)
+  → get_object_or_404(request.user.orders, pk=7)    SQL: WHERE id = 7 AND user_id = <conta logada>
+       é da conta → order_detail.html     não é (ou não existe) → 404, a mesma resposta
+```
+
+- **Frete:** admin → *Fretes por UF* (preço editável na lista) e *Configuração da loja* (frete grátis a partir de,
+  minutos de reserva). **Os valores atuais são PROVISÓRIOS** (exemplos por região, grátis a partir de R$ 299,00);
+  o admin avisa enquanto houver algum. No checkout, com JavaScript, frete e total aparecem ao escolher a UF
+  (`ativarFreteCheckout`, em `static/js/main.js`, somando em centavos); sem JavaScript, há a tabela num "Ver tabela de frete".
+- **Admin → Pedidos:** status só leitura; ações "Marcar como enviado (só pedidos pagos)" e "Cancelar (só aguardando
+  pagamento; devolve o estoque)". Não existe "marcar como pago": só o gateway confirma pagamento. Só apaga pedido
+  cancelado ou expirado. Busca também pelo e-mail da conta.
+- **Pedidos da v1** (sem conta): migrados para "aguardando pagamento", **sem prazo** (não expiram sozinhos). Ficam só
+  no admin; a dona decide cancelar ou não.
+- **Excluir a conta com pedido ativo** (aguardando pagamento, pago ou enviado há menos de 30 dias): a página explica
+  e não mostra o formulário. **Admin → Usuários → ação "Anonimizar contas selecionadas"** (só a superusuária): pede
+  confirmação, pula equipe, contas já anonimizadas e contas com pedido ativo. Antes de usar a pedido de alguém,
+  confira que o pedido veio do e-mail da conta.
+- **Exportação de dados** (Minha conta) inclui os pedidos da conta.
+
 ## Dados pessoais que o site guarda (LGPD)
 Inventário real, por tabela e campo. A Política de Privacidade e a exclusão de conta se baseiam nele:
 **se o site passar a guardar outro dado, atualize esta tabela, a Política e `contas/privacy.py`.**
@@ -469,7 +555,7 @@ Inventário real, por tabela e campo. A Política de Privacidade e a exclusão d
 |---|---|---|
 | `contas_user` (`contas.User`) | `first_name`, `last_name`, `email`, `password` (só hash Argon2), `last_login`, `date_joined`, `email_verified`, `last_email_sent_at`, `anonymized_at` | Enquanto a conta existir; exclusão = anonimização. Nunca verificada: apagada após 30 dias |
 | `contas_consent` (`Consent`) | `user`, versões aceitas, `accepted_at` | Fica como prova do aceite (sem dado pessoal depois da anonimização) |
-| `pedidos_order` (`Order`) | `customer_name`, `phone`, `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state` | 5 anos, depois anonimizado (ficam cidade e UF). Ligado à conta só na Etapa 5 |
+| `pedidos_order` (`Order`) | `user` (a conta), `customer_name`, `phone`, `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state` | 5 anos, depois anonimizado (ficam cidade e UF). Continua ligado à conta anonimizada. Entra na exportação |
 | `django_session` | carrinho, id da conta, dispositivo 2FA, id do último pedido (codificados) | 14 dias + `clearsessions` |
 | `axes_accessattempt` | e-mail digitado, IP, navegador, caminho, horário | 30 dias |
 | `axes_accesslog` | (desligado: não grava mais) | esvaziado pelo comando |
@@ -490,8 +576,8 @@ Ou só os de um app: `python manage.py test pedidos`.
 |---|---|
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
-| `pedidos/tests.py` | Checkout cria pedido e itens, preço guardado, estoque descontado, cancelamento devolve estoque, mensagem do WhatsApp, admin de pedidos, limite por IP, CSRF |
-| `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login |
+| `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única) |
+| `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança
 | Proteção | Onde |
@@ -503,7 +589,12 @@ Ou só os de um app: `python manage.py test pedidos`.
 | Escape automático nos templates (nenhum filtro `safe`) | `templates/` |
 | Validação de entrada com Forms; upload só JPG/PNG/WebP até 2 MB | `pedidos/forms.py`, `carrinho/forms.py`, `loja/validators.py` |
 | API somente leitura, fechada por padrão, sem estoque exato, limite de 60 req/min | `loja/api_views.py`, `REST_FRAMEWORK` |
-| Confirmação do pedido sem número na URL (vem da sessão) | `pedidos/views.py` |
+| Pedido só visível para a dona (contra IDOR): consulta sempre por `request.user.orders`, 404 igual para tudo | `pedidos/views.py::my_orders`, `order_detail` |
+| Status só muda pela tabela de transições, com trava na linha; "pago" não existe no admin | `pedidos/models.py::Order.save`, `pedidos/admin.py` |
+| Estoque devolvido uma vez só, mesmo com expiração e pagamento ao mesmo tempo | `pedidos/reservations.py::expire_order` |
+| Frete, status e dona definidos pelo servidor (campos fora do formulário são ignorados) | `pedidos/checkout.py`, `pedidos/forms.py` |
+| Link do WhatsApp sem dado pessoal na URL | `pedidos/whatsapp.py` |
+| Anonimizar pelo admin: só superusuária, com confirmação, pula equipe e pedido ativo | `contas/admin.py::UserAdmin.anonymize_accounts` |
 | Limite de 5 pedidos por hora por IP | `pedidos/rate_limit.py` |
 | LGPD: só os dados necessários, aviso no checkout, Política e Termos (rascunhos versionados) | `templates/pedidos/checkout.html`, `templates/loja/privacy.html`, `templates/loja/terms.html` |
 | Aceite registrado (versão + data/hora), caixa desmarcada | `contas/models.py::Consent`, `contas/views.py::record_consent` |
@@ -529,8 +620,10 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] Senha do MySQL forte e diferente da de desenvolvimento.
 - [ ] `python manage.py migrate` e `python manage.py collectstatic` (copia os estáticos para `staticfiles/`, que o servidor web serve, junto com `media/`).
 - [ ] `python manage.py check --deploy`: devem sobrar só os avisos `W005` e `W021` (HSTS em subdomínios e *preload*), desligados de propósito (veja DECISIONS.md, decisão 48).
-- [ ] **Pendências de produção (decisão 69):** v2 Etapas 5 e 9 concluídas; hospedagem definida (atualizar operadores e prazo de backup na Política); revisão jurídica da Política e dos Termos; identificação do fornecedor (CNPJ) preenchida pela dona no `.env`.
+- [ ] **Pendências de produção (decisão 69):** v2 Etapas 7, 8 e 9 concluídas; valores reais do frete (e "PROVISÓRIO" desmarcado); hospedagem definida (atualizar operadores e prazo de backup na Política); revisão jurídica da Política e dos Termos; identificação do fornecedor (CNPJ) preenchida pela dona no `.env`.
 - [ ] **Agendar** `python manage.py limpar_dados_antigos` para rodar sozinho (ex.: uma vez por dia). O jeito depende da hospedagem (decisão 79).
+- [ ] **Agendar** `python manage.py expirar_pedidos` a cada 5 minutos (decisão 88). Sem ele, a reserva vencida só é liberada quando alguém abre o produto, o carrinho, o checkout ou "Meus pedidos".
+- [ ] Backup do banco (`mysqldump`) antes de cada `migrate` em produção.
 - [ ] Banco com usuário **dedicado** (nunca `root`) e senha forte, diferente da de desenvolvimento (decisão 70).
 - [ ] **E-mail de verdade:** configurar o SMTP do Brevo (`EMAIL_BACKEND` e credenciais no `.env`) e um `DEFAULT_FROM_EMAIL` de um domínio da loja. Com o backend de console, ninguém recebe o link de verificação nem o de nova senha.
 - [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**, rodar `configurar_2fa` e guardar os códigos de backup; rodar `criar_grupos`.
@@ -573,6 +666,12 @@ Decisões de negócio que só a dona pode tomar (algumas com orientação juríd
 6. **Contato para assuntos de privacidade** (encarregado). Proposta: o próprio `elegancia.crist@gmail.com`.
 7. Quem fará a **revisão jurídica** da Política e dos Termos antes da publicação.
 8. Valor dos **juros do parcelamento** (perguntar na v2 Etapa 6).
+9. **Frete (v2 Etapa 5):** valor real por estado (ou região), valor a partir do qual o frete é grátis e se a loja entrega
+   nos 27 estados. Hoje: valores PROVISÓRIOS.
+10. **Estorno de pedido já enviado:** a peça volta ao estoque só depois de chegar e ser conferida (como está) ou na hora do estorno?
+11. **Exclusão de conta:** bloquear por 30 dias depois do envio está bom?
+12. A cliente pode **cancelar sozinha** um pedido aguardando pagamento? (Hoje não: ele expira em 30 minutos, ou ela fala com a loja.)
+13. Precisa de um status **"entregue"**? Hoje o fluxo termina em "enviado".
 
 ## Roteiro da v2
 O escopo e as etapas da v2 estão no [CLAUDE.md](CLAUDE.md#etapas-do-roteiro-da-v2). Cada etapa concluída ganha

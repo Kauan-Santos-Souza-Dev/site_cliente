@@ -5,7 +5,8 @@ Política de Privacidade e os testes usem os MESMOS valores.
 
 Versões dos textos (decisão 77):
 Quando a Política de Privacidade ou os Termos de Uso mudarem, troque a
-versão abaixo (usamos a data da mudança). Cada aceite gravado no banco
+versão abaixo (usamos a data da mudança; se mudar duas vezes no mesmo dia,
+acrescente ".2", ".3"...). Cada aceite gravado no banco
 (model `Consent`) guarda a versão que a cliente leu. Assim dá para provar
 O QUE foi aceito e QUANDO, mesmo depois que o texto mudar.
 
@@ -18,7 +19,9 @@ dependem de lei estão marcados para revisão jurídica. Quem aplica os prazos
 from datetime import timedelta
 
 # --- Versões dos textos ---------------------------------------------------
-PRIVACY_POLICY_VERSION = '2026-11-22'
+# .2 (v2 Etapa 5): pedido ligado à conta, exportação com pedidos, exclusão
+# bloqueada com pedido em andamento.
+PRIVACY_POLICY_VERSION = '2026-11-22.2'
 TERMS_VERSION = '2026-11-22'
 
 # --- Prazos de retenção ---------------------------------------------------

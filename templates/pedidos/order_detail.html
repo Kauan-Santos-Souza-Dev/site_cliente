@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% comment %}
+  Detalhe de um pedido (view pedidos.views.order_detail, v2 Etapa 5).
+  O pedido é buscado por número E dona: pedido de outra conta dá 404.
+  É também a página que a cliente vê logo depois de finalizar a compra.
+{% endcomment %}
+
+{% block title %}Pedido nº {{ order.pk }} — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <h1 class="secao__titulo">Pedido nº {{ order.pk }}</h1>
+    <p>Feito em {{ order.created_at|date:"d/m/Y \à\s H:i" }} · <span class="status status--{{ order.status }}">{{ order.get_status_display }}</span></p>
+
+    {% if order.is_awaiting_payment %}
+      <div class="confirmacao__passo">
+        {% if order.expires_at %}
+          <p><strong>Suas peças estão reservadas até {{ order.expires_at|date:"H:i" }} de {{ order.expires_at|date:"d/m" }}.</strong>
+            Se o pagamento não acontecer até lá, o pedido expira e as peças voltam para a loja.</p>
+        {% endif %}
+        {# O pagamento online (Pix e cartão) entra nas v2 Etapas 7 e 8. #}
+        <p>Pagamento online (Pix e cartão) em breve.</p>
+      </div>
+    {% elif order.status == 'expirado' %}
+      <p class="mensagem mensagem--info">O prazo para pagar terminou e as peças voltaram para a loja. Se ainda quiser, é só fazer um novo pedido.</p>
+    {% endif %}
+
+    <h2>Itens</h2>
+    <ul class="resumo">
+      {% for item in order.items.all %}
+      <li class="resumo__item">
+        <span>{{ item.product_name }} ({{ item.size }}) × {{ item.quantity }}</span>
+        <span>R$ {{ item.subtotal }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <dl class="dados">
+      <dt>Produtos</dt>
+      <dd>R$ {{ order.items_total }}</dd>
+      <dt>Frete</dt>
+      <dd>{% if order.shipping_cost is None %}a combinar{% elif order.shipping_cost == 0 %}grátis{% else %}R$ {{ order.shipping_cost }}{% endif %}</dd>
+      <dt>Total</dt>
+      <dd><strong>R$ {{ order.total }}</strong></dd>
+    </dl>
+
+    <h2>Entrega</h2>
+    <p>
+      {{ order.customer_name }}<br>
+      {{ order.street }}, {{ order.number }}{% if order.complement %}, {{ order.complement }}{% endif %}<br>
+      {{ order.neighborhood }} — {{ order.city }}/{{ order.state }}<br>
+      CEP {{ order.cep|slice:":5" }}-{{ order.cep|slice:"5:" }}
+    </p>
+    {% if order.shipped_at %}<p>Enviado em {{ order.shipped_at|date:"d/m/Y" }}.</p>{% endif %}
+
+    {# target="_blank" abre em nova aba; rel="noopener" impede a nova aba de controlar esta. #}
+    <p><a class="botao botao--whatsapp" href="{{ whatsapp_url }}" target="_blank" rel="noopener">Falar com a loja sobre este pedido</a></p>
+
+    <p class="conta__alternativa"><a href="{% url 'my_orders' %}">← Meus pedidos</a></p>
+  </div>
+</section>
+{% endblock %}

@@ -41,7 +41,7 @@ def export_user_data(user):
 
     O hash da senha NÃO entra: não é útil para a cliente e, fora do banco,
     só serviria para alguém tentar adivinhar a senha.
-    Pedidos entram na Etapa 5, quando forem ligados à conta.
+    Pedidos: só os da própria conta (user.orders), decisão 93.
     """
     return {
         'loja': 'Elegância Cristã',
@@ -62,6 +62,44 @@ def export_user_data(user):
             }
             for consent in user.consents.all()
         ],
+        'pedidos': [export_order(order) for order in user.orders.prefetch_related('items')],
+    }
+
+
+def money(value):
+    """Decimal -> texto ("229.90"), ou None. Texto não perde centavos (decisão 33)."""
+    return str(value) if value is not None else None
+
+
+def export_order(order):
+    """Um pedido em forma de dicionário, para a exportação."""
+    return {
+        'numero': order.pk,
+        'feito_em': order.created_at.isoformat(),
+        'status': order.get_status_display(),
+        'itens': [
+            {
+                'produto': item.product_name,
+                'tamanho': item.size,
+                'quantidade': item.quantity,
+                'preco_unitario': money(item.unit_price),
+            }
+            for item in order.items.all()
+        ],
+        'produtos': money(order.items_total),
+        'frete': money(order.shipping_cost),
+        'total': money(order.total),
+        'entrega': {
+            'nome': order.customer_name,
+            'telefone': order.phone,
+            'cep': order.cep,
+            'rua': order.street,
+            'numero': order.number,
+            'complemento': order.complement,
+            'bairro': order.neighborhood,
+            'cidade': order.city,
+            'uf': order.state,
+        },
     }
 
 
@@ -81,9 +119,10 @@ def anonymized_email(user):
 def anonymize_user(user):
     """Apaga os dados pessoais da conta, mantendo a linha (decisão 78).
 
-    PENDÊNCIA da Etapa 5: quando os pedidos forem ligados à conta, bloquear
-    ou condicionar a exclusão enquanto houver pedido ATIVO (aguardando
-    pagamento, pago e não entregue, estorno em andamento).
+    Quem chama confere antes se a conta tem pedido ATIVO (decisão 92):
+    a página "Excluir conta" e a ação "Anonimizar" do admin. Os pedidos
+    continuam ligados à linha da conta, com os dados de entrega, pelo prazo
+    da decisão 79.
 
     transaction.atomic(): ou tudo é anonimizado, ou nada muda. Uma conta
     "meio anonimizada" seria pior que as duas situações.
@@ -175,6 +214,10 @@ def old_unverified_accounts(now):
         is_staff=False,
         anonymized_at__isnull=True,
         date_joined__lt=now - UNVERIFIED_ACCOUNT_RETENTION,
+        # Defesa extra: o checkout exige e-mail verificado, então essas contas
+        # não deveriam ter pedido. Se tiverem, não são apagadas (e o PROTECT
+        # do Order.user recusaria o delete de qualquer forma).
+        orders__isnull=True,
     )
 
 

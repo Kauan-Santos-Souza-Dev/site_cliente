@@ -28,3 +28,47 @@ def login_admin(client, user):
     session[DEVICE_ID_SESSION_KEY] = device.persistent_id
     session.save()
     return device
+
+
+# Endereço de entrega válido, já só com dígitos (como fica no banco).
+ORDER_ADDRESS = {
+    'customer_name': 'Maria da Silva',
+    'phone': '11912345678',
+    'cep': '01234567',
+    'street': 'Rua das Flores',
+    'number': '100',
+    'complement': 'Apto 12',
+    'neighborhood': 'Centro',
+    'city': 'São Paulo',
+    'state': 'SP',
+}
+
+
+def make_variant(slug='vestido-teste', price='150.00', size='M', stock=5):
+    """Cria um produto ativo (categoria Vestidos) com um tamanho e devolve a variação."""
+    from loja.models import Category, Product, ProductVariant
+
+    product = Product.objects.create(
+        category=Category.objects.get(slug='vestidos'),
+        name=f'Produto {slug}', slug=slug, price=price,
+    )
+    return ProductVariant.objects.create(product=product, size=size, stock=stock)
+
+
+def make_order(user=None, status='aguardando_pagamento', variant=None, quantity=1, **fields):
+    """Cria um pedido com 1 item, DIRETO no banco (sem passar pelo checkout).
+
+    Simula um pedido já feito: o estoque da variação NÃO é descontado aqui;
+    o teste escolhe o estoque "depois da compra" ao criar a variação.
+    """
+    from pedidos.models import Order, OrderItem
+
+    order = Order.objects.create(user=user, status=status, **{**ORDER_ADDRESS, **fields})
+    OrderItem.objects.create(
+        order=order, variant=variant,
+        product_name=variant.product.name if variant else 'Peça apagada',
+        size=variant.size if variant else 'M',
+        unit_price=variant.product.price if variant else '100.00',
+        quantity=quantity,
+    )
+    return order
