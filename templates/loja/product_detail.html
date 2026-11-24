@@ -48,6 +48,12 @@
       <p class="produto__categoria">{{ product.category.name }}</p>
       <h1 class="produto__nome">{{ product.name }}</h1>
       <p class="produto__preco">R$ {{ product.price }}</p>
+      {% if best_installment %}
+        <p class="produto__parcelas">
+          ou em até {{ best_installment.number }}x no cartão
+          {% if best_installment.amount %}(estimativa: {{ best_installment.number }}x de R$ {{ best_installment.amount }}){% endif %}
+        </p>
+      {% endif %}
 
       {% if product.description %}
         {# linebreaks transforma as quebras de linha do admin em parágrafos. #}

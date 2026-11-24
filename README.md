@@ -89,9 +89,14 @@ Lema: *"Operando Deus quem impedirá"*. Projeto da Fidela Web, feito em Python, 
 No MySQL, uma migration que falha no meio **não** desfaz as mudanças de tabela que já fez. Antes de um
 `migrate` que mexe em tabelas com dados (ex.: a v2 Etapa 5, que liga o pedido à conta), faça uma cópia:
 ```powershell
-& "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe" -u elegancia -p --single-transaction --no-tablespaces elegancia_crista > backup.sql
+& "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe" -u elegancia -p --single-transaction --no-tablespaces --result-file="C:\caminho\fora\do\projeto\backup.sql" elegancia_crista
 ```
 (o `-p` pede a senha no terminal; o arquivo `backup.sql` tem dados pessoais: guarde fora do projeto e apague quando não precisar mais).
+
+**Não use `>` para gravar o backup:** no PowerShell 5 o `>` grava em UTF-16 e estraga o arquivo
+(acentos e restauração). O `--result-file` faz o próprio `mysqldump` gravar em UTF-8.
+
+> A venv deste projeto se chama **`.venv`** (ative com `.venv\Scripts\activate`).
 
 ### Recriar o banco de desenvolvimento
 Necessário uma vez, ao passar da v1 para a v2: a troca do modelo de usuário (v2 etapa 2, decisão 64)
@@ -151,6 +156,7 @@ PROJETO/
 │   ├── models.py      # Order (conta, status e transições), OrderItem, ShippingRate, active_orders
 │   ├── checkout.py    # create_order: carrinho -> pedido com frete e reserva (transaction.atomic)
 │   ├── shipping.py    # calculate_shipping: tabela por UF + frete grátis
+│   ├── installments.py # calculate_installments e get_installment_limit: parcelas do cartão
 │   ├── reservations.py # expira pedidos não pagos e devolve o estoque
 │   ├── whatsapp.py    # format_brl e link wa.me "falar sobre o pedido"
 │   ├── forms.py       # CheckoutForm (telefone e CEP só com dígitos)
@@ -582,6 +588,45 @@ POST /pedido/meus-pedidos/7/cancelar/ → config/urls.py → pedidos/urls.py →
   → messages + redirect /pedido/meus-pedidos/ → templates/pedidos/my_orders.html
 ```
 
+### Parcelamento no cartão (apps `loja/` e `pedidos/`) — v2 etapa 6
+O admin escolhe quantas parcelas são possíveis e se o limite vale para todos os produtos ou só para um
+(decisões 98 e 99). **O site só mostra as opções e (na Etapa 8) envia o limite ao Mercado Pago; quem divide e cobra é o
+gateway.** Os valores mostrados são **estimativa**. Pix é sempre à vista.
+
+**Como configurar (admin):**
+- **Configuração da loja → Parcelamento no cartão:** máximo de parcelas (padrão 3, de 1 a 12), valor mínimo da parcela
+  (padrão R$ 50,00) e política de juros (padrão "a loja absorve").
+- **Produtos → coluna "máximo de parcelas":** editável direto na lista (botão "Salvar"). Vazio = regra geral; preenchido =
+  vale só para aquele produto, para mais ou para menos. A ação **"Voltar à regra geral de parcelas da loja"** limpa os marcados.
+- **Carrinho com vários produtos:** vale o **menor** limite entre os itens, e a parcela mínima ainda limita o resultado.
+
+| Carrinho | Limite dos produtos | Resultado |
+|---|---|---|
+| R$ 300 | geral (3) | até 3x (R$ 100 cada) |
+| R$ 120 | geral (3) | até **2x** (a parcela mínima de R$ 50 vence) |
+| R$ 120 | um produto com 10x | até **2x** (a parcela mínima vence o limite do produto) |
+| R$ 600 | um com 6x + um sem limite (geral 3) | até **3x** (o menor limite vale) |
+| R$ 30 | qualquer | só 1x |
+
+**Centavos:** a soma das parcelas é sempre exatamente o total. A parcela comum é truncada em centavos e a sobra fica na
+primeira: R$ 100,00 em 3x = 33,34 + 33,33 + 33,33.
+
+**Caminho do checkout (GET):**
+```
+GET /pedido/finalizar/ → config/urls.py → pedidos/urls.py → pedidos/views.py::checkout
+  → Cart(request).items()                                    itens com o produto de cada um
+  → installments.get_installment_limit(produtos)             menor limite: Product.max_installments ou StoreSettings
+  → installments.calculate_installments(total dos produtos, limite)
+       → StoreSettings.load()                                parcela mínima e política de juros
+  → templates/pedidos/checkout.html                          "Pix: à vista / Cartão: em até Nx" + estimativa
+```
+A página do produto (`loja/views.py::product_detail`) usa as mesmas duas funções para a linha "ou em até Nx no cartão".
+
+**Antes de aplicar a migration `loja/0005_parcelamento`** (4 `AddField`), faça o backup do banco (veja "Backup antes de migrar").
+
+**Checklist sandbox → produção:** a política de juros do site precisa ser **igual** à da conta do Mercado Pago (o
+"sem juros" é configurado lá, não pela API). Veja o checklist no fim deste arquivo.
+
 ## Dados pessoais que o site guarda (LGPD)
 Inventário real, por tabela e campo. A Política de Privacidade e a exclusão de conta se baseiam nele:
 **se o site passar a guardar outro dado, atualize esta tabela, a Política e `contas/privacy.py`.**
@@ -611,7 +656,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 |---|---|
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
-| `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97) |
+| `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97). **v2 Etapa 6:** parcelas (limite, parcela mínima, soma exata dos centavos em 1x a 12x, `Decimal`, política "cliente paga"); menor limite do carrinho; produto com limite maior que o geral em compra pequena (a parcela mínima vence); páginas do produto e do checkout (estimativa, nunca "sem juros"); admin (edição em lista recusa 0 e 13, ação "voltar à regra geral", grupo "Loja") |
 | `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança
@@ -659,6 +704,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] **Agendar** `python manage.py limpar_dados_antigos` para rodar sozinho (ex.: uma vez por dia). O jeito depende da hospedagem (decisão 79).
 - [ ] **Agendar** `python manage.py expirar_pedidos` a cada 5 minutos (decisão 88). Sem ele, a reserva vencida só é liberada quando alguém abre o produto, o carrinho, o checkout ou "Meus pedidos".
 - [ ] Backup do banco (`mysqldump`) antes de cada `migrate` em produção.
+- [ ] **Parcelamento:** a "política de juros" do admin (Configuração da loja) é igual à configurada na **conta do Mercado Pago**; se for "a cliente paga", a **revisão jurídica** cobre a informação sobre juros (CDC, art. 52); na Etapa 8, o limite de parcelas é calculado no servidor e congelado no pedido, nunca vindo do navegador (decisão 99).
 - [ ] Banco com usuário **dedicado** (nunca `root`) e senha forte, diferente da de desenvolvimento (decisão 70).
 - [ ] **E-mail de verdade:** configurar o SMTP do Brevo (`EMAIL_BACKEND` e credenciais no `.env`) e um `DEFAULT_FROM_EMAIL` de um domínio da loja. Com o backend de console, ninguém recebe o link de verificação nem o de nova senha.
 - [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**, rodar `configurar_2fa` e guardar os códigos de backup; rodar `criar_grupos`.
@@ -700,7 +746,9 @@ Decisões de negócio que só a dona pode tomar (algumas com orientação juríd
 5. **Prazo e forma de entrega** (para os Termos).
 6. **Contato para assuntos de privacidade** (encarregado). Proposta: o próprio `elegancia.crist@gmail.com`.
 7. Quem fará a **revisão jurídica** da Política e dos Termos antes da publicação.
-8. Valor dos **juros do parcelamento** (perguntar na v2 Etapa 6).
+8. **Parcelamento (v2 Etapa 6, perguntas à dona):** (a) **juros**: a loja absorve ou a cliente paga? (padrão atual: a loja absorve);
+   (b) **parcela mínima** (padrão R$ 50,00); (c) **máximo padrão** (3x) e se algum produto de valor mais alto deve ter mais
+   parcelas; (d) quem configura o "sem juros" na **conta do Mercado Pago**, e quando (antes da Etapa 8).
 9. **Frete (v2 Etapa 5):** valor real por estado (ou região), valor a partir do qual o frete é grátis e se a loja entrega
    nos 27 estados. Hoje: valores PROVISÓRIOS.
 10. **Estorno de pedido já enviado:** a peça volta ao estoque só depois de chegar e ser conferida, pela ação do admin (etapa 5b). Confirmar com a dona. **Devolução parcial** (só uma das peças): por enquanto é ajuste manual do estoque (definido pelo Kauan); a ação devolve todas as peças.

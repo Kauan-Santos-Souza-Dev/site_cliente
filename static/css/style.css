@@ -622,6 +622,13 @@ main:focus {
   font-size: 1.6rem;
   font-weight: 700;
 }
+.produto__parcelas {
+  margin-top: 0.25rem;
+  color: var(--cor-texto-suave, inherit);
+}
+.texto-pequeno {
+  font-size: 0.875rem;
+}
 .produto__subtitulo {
   font-size: 1.4rem;
   margin-top: 1.5rem;

@@ -37,10 +37,13 @@ class ProductAdmin(admin.ModelAdmin):
     """Listagem útil de produtos, com busca, filtros e edição rápida."""
 
     list_display = (
-        'name', 'category', 'price', 'total_stock', 'is_active', 'is_featured',
+        'name', 'category', 'price', 'max_installments', 'total_stock', 'is_active', 'is_featured',
     )
-    # Permite marcar ativo/destaque direto na listagem.
-    list_editable = ('is_active', 'is_featured')
+    # Permite marcar ativo/destaque e o limite de parcelas direto na listagem
+    # (decisão 98): é assim que a dona muda vários produtos de uma vez. Os
+    # validadores do model (1 a 12) valem também aqui.
+    list_editable = ('is_active', 'is_featured', 'max_installments')
+    actions = ['reset_installments']
     list_filter = ('category', 'is_active', 'is_featured')
     search_fields = ('name', 'description')
     # O slug é preenchido sozinho a partir do nome.
@@ -52,6 +55,12 @@ class ProductAdmin(admin.ModelAdmin):
         # uma consulta por produto ao calcular total_stock (problema "N+1").
         return super().get_queryset(request).prefetch_related('variants')
 
+    @admin.action(description='Voltar à regra geral de parcelas da loja')
+    def reset_installments(self, request, queryset):
+        """Limpa o limite próprio dos produtos marcados (vazio = regra geral)."""
+        updated = queryset.update(max_installments=None)
+        self.message_user(request, f'{updated} produto(s) voltaram à regra geral de parcelas.')
+
     @admin.display(description='estoque total')
     def total_stock(self, obj):
         return obj.total_stock
@@ -61,7 +70,15 @@ class ProductAdmin(admin.ModelAdmin):
 class StoreSettingsAdmin(admin.ModelAdmin):
     """Configuração da loja: uma linha só, que se edita mas não se cria de novo nem se apaga."""
 
-    list_display = ('__str__', 'reservation_minutes', 'free_shipping_threshold', 'free_shipping_is_provisional')
+    list_display = (
+        '__str__', 'reservation_minutes', 'free_shipping_threshold',
+        'max_installments', 'min_installment_value', 'interest_policy',
+    )
+    fieldsets = (
+        ('Reserva do estoque', {'fields': ('reservation_minutes',)}),
+        ('Frete grátis', {'fields': ('free_shipping_threshold', 'free_shipping_is_provisional')}),
+        ('Parcelamento no cartão', {'fields': ('max_installments', 'min_installment_value', 'interest_policy')}),
+    )
 
     def has_add_permission(self, request):
         """Só permite "adicionar" se a linha ainda não existir."""

@@ -8,6 +8,11 @@ from django.urls import reverse
 
 from .validators import validate_image_file
 
+# Teto de parcelas aceito no admin (decisão 98). O Mercado Pago aceita mais,
+# mas para uma loja deste porte 12 já é bastante, e o limite evita um erro de
+# digitação (ex.: 36) virar uma oferta absurda.
+MAX_INSTALLMENTS_LIMIT = 12
+
 
 class Category(models.Model):
     """Categoria fixa do catálogo (Vestidos, Saias, Conjuntos)."""
@@ -40,6 +45,15 @@ class Product(models.Model):
     description = models.TextField('descrição', blank=True)
     # Dinheiro sempre em DecimalField (float erra centavos).
     price = models.DecimalField('preço (R$)', max_digits=8, decimal_places=2)
+    # Limite de parcelas só deste produto (decisão 98). Vazio = vale a regra geral
+    # da loja (StoreSettings.max_installments). Preenchido = SUBSTITUI a regra geral,
+    # para mais ou para menos. Num carrinho com vários produtos vale o MENOR limite.
+    max_installments = models.PositiveSmallIntegerField(
+        'máximo de parcelas (só deste produto)',
+        null=True, blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_INSTALLMENTS_LIMIT)],
+        help_text=f'Deixe vazio para usar a regra geral da loja. Entre 1 e {MAX_INSTALLMENTS_LIMIT}.',
+    )
     is_featured = models.BooleanField('destaque na página inicial', default=False)
     # is_active permite ocultar o produto sem apagá-lo.
     is_active = models.BooleanField('ativo', default=True)
@@ -156,8 +170,14 @@ class StoreSettings(models.Model):
     código, a dona muda no admin, sem precisar de programador. Use sempre
     StoreSettings.load() para ler.
 
-    A v2 Etapa 6 acrescenta aqui as regras de parcelamento.
+    A v2 Etapa 6 acrescentou as regras de parcelamento (decisões 98 e 99).
     """
+
+    class InterestPolicy(models.TextChoices):
+        """Quem paga os juros do parcelamento no cartão (decisão 99)."""
+
+        NO_INTEREST = 'no_interest', 'A loja absorve os juros'
+        CUSTOMER_PAYS = 'customer_pays', 'A cliente paga os juros'
 
     # Quanto tempo as peças ficam reservadas para um pedido não pago (decisão 58).
     reservation_minutes = models.PositiveIntegerField(
@@ -177,6 +197,27 @@ class StoreSettings(models.Model):
     free_shipping_is_provisional = models.BooleanField(
         'valor do frete grátis é PROVISÓRIO', default=True,
         help_text='Desmarque quando a dona confirmar o valor real.',
+    )
+
+    # --- Parcelamento no cartão (decisões 98 e 99) ---------------------------
+    max_installments = models.PositiveSmallIntegerField(
+        'máximo de parcelas (regra geral)',
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_INSTALLMENTS_LIMIT)],
+        help_text=f'Vale para todos os produtos que não têm limite próprio. Entre 1 e {MAX_INSTALLMENTS_LIMIT}.',
+    )
+    min_installment_value = models.DecimalField(
+        'valor mínimo da parcela (R$)',
+        max_digits=8, decimal_places=2, default=Decimal('50.00'),
+        validators=[MinValueValidator(Decimal('5.00'))],
+        help_text='Nenhuma parcela fica abaixo disso: uma compra de R$ 120 com mínimo de R$ 50 vai até 2x.',
+    )
+    interest_policy = models.CharField(
+        'política de juros', max_length=20,
+        choices=InterestPolicy.choices, default=InterestPolicy.NO_INTEREST,
+        help_text='ATENÇÃO: isto só muda o que o SITE mostra. Quem cobra os juros (ou não) é o '
+                  'Mercado Pago, e isso é configurado na CONTA do Mercado Pago, não aqui. '
+                  'As duas coisas precisam estar iguais.',
     )
 
     class Meta:

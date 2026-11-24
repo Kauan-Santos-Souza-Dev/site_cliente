@@ -10,6 +10,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 
 from contas import legal
+from pedidos.installments import calculate_installments, get_installment_limit
 from pedidos.models import DELIVERED_ACTIVE_PERIOD
 from pedidos.reservations import expire_overdue_orders
 
@@ -85,8 +86,11 @@ def product_detail(request, slug):
     expire_overdue_orders()
     # Produto inativo também dá 404: para o cliente, ele "não existe".
     product = get_object_or_404(active_products(), slug=slug)
+    # Parcelas: só uma linha informativa com a MAIOR opção (estimativa).
+    options = calculate_installments(product.price, get_installment_limit([product]))
     context = {
         'product': product,
+        'best_installment': options[-1] if options[-1].number > 1 else None,
         'images': product.images.all(),
         'variants': product.sorted_variants(),
     }

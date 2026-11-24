@@ -20,6 +20,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 4 | LGPD: aceite, Minha conta, retenção, textos legais, cookies | 77 a 85 (e reescreve 69) |
 | v2 · 5 | Pedido ligado à conta, status, reserva de estoque, frete, Meus pedidos | 86 a 94 (e atualiza 44, 46, 78 e 80) |
 | v2 · 5b | Status "entregue", cancelamento pela cliente, devolução manual de estoque | 95 a 97 (e atualiza 87 e 92) |
+| v2 · 6 | Parcelamento configurável: regra geral, limite por produto, cálculo, juros e gateway | 98 e 99 (e atualiza 56 e 57) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -299,11 +300,11 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 ## 56. Política de juros como configuração — v2 Etapa 1
 - **Escolha:** a dona ainda não decidiu se a loja absorve os juros ("sem juros") ou se a cliente paga. Por isso a política vira um campo do `StoreSettings`. O valor será perguntado na v2 Etapa 6.
 - **Atenção:** no Mercado Pago, o "sem juros" é configurado **na conta do gateway**, não pela API. O que o site mostra precisa bater com essa configuração. Isso vai num aviso no admin e no checklist do README.
-- **Implementação:** v2 Etapa 6.
+- **Implementação:** v2 Etapa 6 (decisão 99): campo `StoreSettings.interest_policy`, padrão "a loja absorve". O valor definitivo continua pendente da dona.
 
 ## 57. Até 3 parcelas, parcela mínima de R$ 50 — v2 Etapa 1
 - **Escolha:** valores iniciais da regra geral: **até 3x** e **parcela mínima de R$ 50,00**, ambos editáveis no admin (e o máximo pode ser sobrescrito por produto). Exemplo: num carrinho de R$ 120, a parcela mínima permite no máximo 2x (2 × R$ 60).
-- **Implementação:** v2 Etapa 6 (`StoreSettings` + função de cálculo). O máximo vai para o Checkout Pro na Etapa 8.
+- **Implementação:** v2 Etapa 6 (`StoreSettings` + função de cálculo, decisão 98). O máximo vai para o Checkout Pro na Etapa 8.
 
 ## 58. Pix expira em 30 minutos e devolve o estoque — v2 Etapa 1
 - **Escolha:** a cobrança Pix expira em **30 minutos** (configurável). Quando expira, o pedido vira "expirado" e o estoque reservado volta.
@@ -632,3 +633,29 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **O que os testes NÃO provam:** rodam no MySQL (`test_elegancia_crista`), mas as requisições vão uma depois da outra, na mesma conexão e na transação do `TestCase`; ali o `select_for_update()` nunca espera ninguém. Provam a lógica (clique duplo, status já mudado), não a corrida real de duas requisições simultâneas. Isso vale para as decisões 88, 96 e 97 (a de 88 tem teste de "corrida" simulada, não de concorrência real).
 - **Permissão:** sem model novo, então o grupo "Loja" (que edita pedidos) já pode usar a ação.
 - **Descartado:** devolver o estoque no momento do estorno (a peça ainda está com a cliente e poderia ser vendida de novo sem existir na loja); campo de texto livre para a dona "registrar" (o histórico do admin já grava quem e quando).
+
+## 98. Parcelamento: regra geral na loja, limite opcional por produto, o menor vale no carrinho — v2 Etapa 6
+- **Escolha:**
+  - **Regra geral** no `StoreSettings` (sem tabela nova): `max_installments` (padrão **3**, de 1 a 12) e `min_installment_value` (padrão **R$ 50,00**, mínimo aceito R$ 5,00). Os dois são editáveis no admin (decisão 57).
+  - **Por produto:** `Product.max_installments`, opcional (de 1 a 12). **Vazio** = vale a regra geral. **Preenchido** = **substitui** a regra geral, para mais ou para menos (ex.: um conjunto de R$ 400 pode ter 6x mesmo com a regra geral em 3x).
+  - **Carrinho com vários produtos:** cada item tem o seu limite (o do produto, ou o geral se estiver vazio) e vale o **MENOR** entre os itens (`pedidos/installments.py::get_installment_limit`). Sobre esse limite ainda se aplica a parcela mínima: `número máximo = total ÷ parcela mínima` (divisão inteira, nunca menos que 1). Exemplo: carrinho de R$ 120, limite 3, mínimo R$ 50 → **2x** (2 × R$ 60). Um produto com limite próprio de 10x num carrinho de R$ 120 também fica em 2x: **a parcela mínima vence**.
+  - **No admin:** a coluna "máximo de parcelas" é **editável na lista de produtos** (`list_editable`), então a dona muda vários produtos de uma vez; e a ação **"Voltar à regra geral de parcelas da loja"** limpa o campo dos produtos marcados. Os validadores do model (1 a 12) valem também na edição em lista (testado com 0 e 13).
+- **Onde aparece (informativo):** página do produto ("ou em até Nx no cartão") e checkout (Pix à vista; cartão em até Nx). Nada de "sem juros" nem valor final prometido: os valores são **estimativa**, até a Etapa 8 confirmar no sandbox. Não aparece no carrinho (o frete ainda não é conhecido ali).
+- **Permissões:** nenhum model novo, então o grupo "Loja" (que edita `Product` e `StoreSettings`) já pode mexer nos campos novos, e `criar_grupos` não mudou. Um teste confirma.
+- **Descartado:** nova tabela de configuração (o `StoreSettings` já existe); ação do admin com tela intermediária para "definir limite X" (a edição em lista resolve com menos código; pode entrar se a dona pedir); o limite por produto só poder diminuir (a dona quer poder oferecer mais parcelas num produto caro).
+
+## 99. Cálculo das parcelas, política de juros e alinhamento com o Mercado Pago — v2 Etapa 6
+- **Função única:** `pedidos/installments.py::calculate_installments(total, max_installments=None)` devolve a lista de `InstallmentOption(number, amounts, total)`, de 1x até o maior número permitido. Sempre existe 1x. `total` precisa ser `Decimal` positivo (`float` dá `TypeError`).
+- **Centavos:** a parcela comum é `total ÷ n` **truncada** em centavos (`ROUND_DOWN`) e a **sobra vai para a primeira parcela**, então a soma é **exatamente** o total. Ex.: R$ 100,00 em 3x = 33,34 + 33,33 + 33,33. Arredondar cada parcela poderia dar R$ 99,99 ou R$ 100,01. Testado em vários totais e de 1x a 12x.
+- **Política de juros** (`StoreSettings.interest_policy`, decisão 56): `no_interest` (a loja absorve, **padrão**, o mais simples) ou `customer_pays`. O site **não calcula juros de gateway**: com "cliente paga" mostra só o número de parcelas, sem valor por parcela (o site não sabe a taxa). Valor definitivo: pergunta à dona.
+- **Alinhamento com o Mercado Pago** (documentação consultada em 24/11/2026):
+  - Na preferência do Checkout Pro, `payment_methods.installments` é o **número máximo** de parcelas oferecidas. Existe também `default_installments` (parcela pré-selecionada) no exemplo da API, mas a busca não trouxe a definição dele.
+  - O "sem juros" **não é campo da preferência**: é configurado na **conta** do Mercado Pago. O site não consegue forçá-lo. Por isso o `help_text` da política avisa no admin, e o checklist do README ganhou o item.
+  - Não encontramos campo de **parcela mínima** na preferência. Quem garante o mínimo é o nosso cálculo: enviamos o limite já reduzido pela parcela mínima.
+  - Um exemplo em Python da documentação escreve `"installations"`, parece erro de digitação; o nome é `installments`.
+  - **Quem divide e cobra é o Mercado Pago.** O site mostra opções e envia o limite; os valores do site são estimativa. O que vale é o valor confirmado pelo gateway (webhook, conferido contra o total do pedido).
+  - Os nomes exatos dos campos serão confirmados no sandbox na Etapa 8. Nenhum SDK foi instalado nesta etapa.
+- **Estimativa sem frete:** no checkout, o cálculo usa o valor dos **produtos**, sem o frete (a UF é escolhida na mesma tela). Como o total real é maior, o limite mostrado nunca passa do real: erramos para o lado seguro.
+- **PENDÊNCIA DA ETAPA 8 (segurança):** o limite de parcelas enviado ao Mercado Pago deve ser **calculado no servidor**, sobre o **total do pedido** (produtos + frete), com `get_installment_limit` + `calculate_installments`, e **congelado no pedido na criação** (novo campo no `Order`, como o `shipping_cost`). **Nunca aceitar o número de parcelas, o limite ou o valor da parcela vindos do navegador.** Hoje o checkout só exibe a estimativa; nenhum dado de parcelas é enviado nem aceito pelo servidor.
+- **PENDÊNCIA PARA A REVISÃO JURÍDICA:** se a política virar "a cliente paga os juros", a informação ao consumidor sobre juros no parcelamento (**CDC, art. 52**: preço à vista, taxa de juros, acréscimos, número e periodicidade das prestações, soma total a pagar) precisa estar nas telas e nos Termos. Hoje os textos são genéricos, de propósito, e a política padrão é a loja absorver.
+- **Descartado:** calcular juros do gateway no site (a taxa é do Mercado Pago e pode mudar); mostrar "sem juros" nas telas (a promessa depende da conta do gateway, que o site não controla); arredondar cada parcela (a soma não bate); mostrar parcelas no carrinho (sem frete o valor mente).

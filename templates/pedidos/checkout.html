@@ -87,6 +87,27 @@
         </details>
         {# json_script: entrega os dados ao JavaScript com segurança (escapa tudo, sem risco de injetar código). #}
         {{ shipping_table|json_script:"tabela-frete" }}
+        {% comment %}
+          Parcelas: só informação. A cliente escolhe na página do Mercado Pago
+          (Etapa 8). Valores são estimativa sobre os produtos, sem o frete.
+          Pix é sempre à vista.
+        {% endcomment %}
+        <div class="checkout__parcelas">
+          <h3 class="produto__subtitulo">Pagamento</h3>
+          <p><strong>Pix:</strong> à vista.</p>
+          {% with best=installments|last %}
+            <p><strong>Cartão:</strong>
+              {% if best.number > 1 %}em até {{ best.number }}x{% else %}à vista (1x){% endif %}.</p>
+            {% if best.number > 1 and best.amount %}
+              <ul class="lista-simples">
+                {% for option in installments %}
+                  <li>{{ option.number }}x de R$ {{ option.amount }}</li>
+                {% endfor %}
+              </ul>
+              <p class="texto-pequeno">Valores estimados sobre os produtos, sem o frete. O valor final é mostrado na página de pagamento.</p>
+            {% endif %}
+          {% endwith %}
+        </div>
         <p><a href="{% url 'cart_detail' %}">← Voltar ao carrinho</a></p>
       </aside>
     </div>

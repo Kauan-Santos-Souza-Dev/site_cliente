@@ -795,3 +795,273 @@ class OrderAdminTest(TestCase):
         self.assertEqual(self.client.get(url).status_code, 403)
         StoreSettings(reservation_minutes=15).save()  # save() força o id 1
         self.assertEqual(StoreSettings.objects.count(), 1)
+
+
+# ---------------------------------------------------------------------------
+# v2 Etapa 6: parcelamento (decisões 98 e 99)
+# ---------------------------------------------------------------------------
+from django.contrib.auth.models import Group  # noqa: E402
+
+from loja.models import Product  # noqa: E402
+
+from .installments import calculate_installments, get_installment_limit, split_in_cents  # noqa: E402
+
+
+def option_numbers(options):
+    """Só os números de parcelas das opções (facilita comparar nos testes)."""
+    return [option.number for option in options]
+
+
+class InstallmentsCalculationTest(TestCase):
+    """calculate_installments: limite, parcela mínima, centavos e tipo Decimal."""
+
+    def test_padrao_ate_3x_com_minimo_de_50(self):
+        self.assertEqual(StoreSettings.load().max_installments, 3)
+        self.assertEqual(StoreSettings.load().min_installment_value, Decimal('50.00'))
+        # R$ 300: o limite (3x) vence, pois 300 / 50 = 6.
+        self.assertEqual(option_numbers(calculate_installments(Decimal('300.00'))), [1, 2, 3])
+
+    def test_parcela_minima_limita_o_numero_de_parcelas(self):
+        """R$ 120 com mínimo de R$ 50: só até 2x (2 x R$ 60)."""
+        options = calculate_installments(Decimal('120.00'))
+        self.assertEqual(option_numbers(options), [1, 2])
+        self.assertEqual(options[-1].amounts, (Decimal('60.00'), Decimal('60.00')))
+
+    def test_total_abaixo_do_minimo_so_tem_1x(self):
+        options = calculate_installments(Decimal('30.00'))
+        self.assertEqual(option_numbers(options), [1])
+        self.assertEqual(options[0].amounts, (Decimal('30.00'),))
+
+    def test_soma_das_parcelas_e_exatamente_o_total(self):
+        """A sobra de centavos vai na primeira parcela; a soma nunca erra."""
+        totals = ['100.00', '99.99', '0.05', '1000.01', '333.33', '149.90', '1234.56']
+        for text in totals:
+            total = Decimal(text)
+            for number in range(1, 13):
+                parts = split_in_cents(total, number)
+                self.assertEqual(len(parts), number)
+                self.assertEqual(sum(parts), total, f'{text} em {number}x')
+                self.assertTrue(all(part >= 0 for part in parts))
+
+    def test_exemplo_de_100_em_3x(self):
+        self.assertEqual(
+            split_in_cents(Decimal('100.00'), 3),
+            (Decimal('33.34'), Decimal('33.33'), Decimal('33.33')),
+        )
+
+    def test_valores_sao_decimal_nunca_float(self):
+        for option in calculate_installments(Decimal('300.00')):
+            self.assertIsInstance(option.total, Decimal)
+            self.assertTrue(all(isinstance(part, Decimal) for part in option.amounts))
+        with self.assertRaises(TypeError):
+            calculate_installments(300.0)  # float é recusado de propósito
+
+    def test_total_zero_ou_negativo_e_recusado(self):
+        for bad in (Decimal('0'), Decimal('-10.00')):
+            with self.assertRaises(ValueError):
+                calculate_installments(bad)
+
+    def test_limite_passado_menor_que_o_da_loja_vale(self):
+        self.assertEqual(option_numbers(calculate_installments(Decimal('300.00'), 2)), [1, 2])
+
+    def test_limite_maior_que_o_geral_em_compra_pequena_a_parcela_minima_vence(self):
+        """Produto com limite próprio de 10x, mas carrinho de R$ 120: ainda só 2x."""
+        options = calculate_installments(Decimal('120.00'), 10)
+        self.assertEqual(option_numbers(options), [1, 2])
+
+    def test_limite_maior_que_o_geral_em_compra_grande_vale(self):
+        options = calculate_installments(Decimal('600.00'), 6)
+        self.assertEqual(option_numbers(options), [1, 2, 3, 4, 5, 6])
+
+    def test_parcela_minima_vem_da_configuracao(self):
+        config = StoreSettings.load()
+        config.min_installment_value = Decimal('20.00')
+        config.max_installments = 12
+        config.save()
+        # 120 / 20 = 6 parcelas.
+        self.assertEqual(option_numbers(calculate_installments(Decimal('120.00'))), [1, 2, 3, 4, 5, 6])
+
+    def test_politica_cliente_paga_nao_inventa_valores(self):
+        config = StoreSettings.load()
+        config.interest_policy = StoreSettings.InterestPolicy.CUSTOMER_PAYS
+        config.save()
+        options = calculate_installments(Decimal('300.00'))
+        self.assertEqual(option_numbers(options), [1, 2, 3])
+        self.assertIsNotNone(options[0].amounts)  # 1x é o próprio total
+        self.assertIsNone(options[1].amounts)
+        self.assertIsNone(options[2].total)
+
+
+class InstallmentLimitTest(TestCase):
+    """get_installment_limit: produto sobrescreve a regra geral; no carrinho vale o MENOR."""
+
+    def setUp(self):
+        self.plain = make_variant(slug='comum').product
+        self.big = make_variant(slug='grande').product
+        self.small = make_variant(slug='pequeno').product
+
+    def test_produto_sem_limite_usa_a_regra_geral(self):
+        self.assertIsNone(self.plain.max_installments)
+        self.assertEqual(get_installment_limit([self.plain]), 3)
+
+    def test_limite_do_produto_substitui_o_geral_para_mais(self):
+        self.big.max_installments = 6
+        self.assertEqual(get_installment_limit([self.big]), 6)
+
+    def test_limite_do_produto_substitui_o_geral_para_menos(self):
+        self.small.max_installments = 1
+        self.assertEqual(get_installment_limit([self.small]), 1)
+
+    def test_carrinho_com_varios_produtos_vale_o_menor(self):
+        self.big.max_installments = 6
+        self.small.max_installments = 2
+        self.assertEqual(get_installment_limit([self.plain, self.big, self.small]), 2)
+
+    def test_menor_considera_a_regra_geral_dos_produtos_sem_limite(self):
+        """Produto com 6x + produto sem limite (geral = 3) -> 3."""
+        self.big.max_installments = 6
+        self.assertEqual(get_installment_limit([self.big, self.plain]), 3)
+
+    def test_sem_produtos_devolve_a_regra_geral(self):
+        self.assertEqual(get_installment_limit([]), 3)
+
+
+class InstallmentsScreensTest(TestCase):
+    """Onde as opções aparecem: página do produto e checkout (nunca "sem juros")."""
+
+    def setUp(self):
+        cache.clear()
+        self.variant = make_variant(price='150.00', stock=5)
+        self.product = self.variant.product
+        self.customer = make_customer()
+        self.client.force_login(self.customer)
+
+    def add_to_cart(self, quantity=1):
+        self.client.post(
+            reverse('cart_add', args=[self.product.id]),
+            {'variant': self.variant.id, 'quantity': quantity},
+        )
+
+    def test_pagina_do_produto_mostra_em_ate_nx_como_estimativa(self):
+        response = self.client.get(self.product.get_absolute_url())
+        # R$ 150 / 50 = 3 -> até 3x de R$ 50,00.
+        self.assertContains(response, 'ou em até 3x no cartão')
+        self.assertContains(response, 'estimativa')
+        self.assertNotContains(response, 'sem juros')
+
+    def test_produto_barato_nao_mostra_parcelamento(self):
+        self.product.price = Decimal('60.00')  # 60 / 50 = 1 -> só 1x
+        self.product.save()
+        response = self.client.get(self.product.get_absolute_url())
+        self.assertNotContains(response, 'no cartão')
+
+    def test_checkout_mostra_pix_a_vista_e_cartao_em_ate_nx(self):
+        self.add_to_cart(2)  # R$ 300
+        response = self.client.get(reverse('checkout'))
+        self.assertContains(response, 'à vista')
+        self.assertContains(response, 'em até 3x')
+        self.assertContains(response, 'Valores estimados')
+        self.assertNotContains(response, 'sem juros')
+
+    def test_checkout_respeita_o_limite_do_produto(self):
+        self.product.max_installments = 2
+        self.product.save()
+        self.add_to_cart(2)  # R$ 300, mas o produto só aceita 2x
+        response = self.client.get(reverse('checkout'))
+        self.assertContains(response, 'em até 2x')
+        self.assertNotContains(response, 'em até 3x')
+
+    def test_checkout_com_politica_cliente_paga_nao_mostra_valores_por_parcela(self):
+        config = StoreSettings.load()
+        config.interest_policy = StoreSettings.InterestPolicy.CUSTOMER_PAYS
+        config.save()
+        self.add_to_cart(2)
+        response = self.client.get(reverse('checkout'))
+        self.assertContains(response, 'em até 3x')
+        self.assertNotContains(response, 'Valores estimados')
+
+
+class InstallmentsAdminTest(TestCase):
+    """Admin: edição em lista (1 a 12), ação "voltar à regra geral" e grupo Loja."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        admin_user = get_user_model().objects.create_superuser(
+            email='dona@example.com', password='senha-teste-123',
+        )
+        login_admin(self.client, admin_user)
+        self.product = make_variant(slug='lista').product
+        self.url = reverse('admin:loja_product_changelist')
+
+    def save_in_list(self, value):
+        """Simula o botão "Salvar" da listagem, editando só o limite de parcelas."""
+        return self.client.post(self.url, {
+            'form-TOTAL_FORMS': '1', 'form-INITIAL_FORMS': '1',
+            'form-MIN_NUM_FORMS': '0', 'form-MAX_NUM_FORMS': '1000',
+            'form-0-id': self.product.pk,
+            'form-0-is_active': 'on',
+            'form-0-max_installments': value,
+            '_save': 'Salvar',
+        })
+
+    def test_edicao_em_lista_aceita_valor_valido(self):
+        self.save_in_list('6')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.max_installments, 6)
+
+    def test_edicao_em_lista_recusa_0_e_13(self):
+        for bad in ('0', '13'):
+            response = self.save_in_list(bad)
+            self.assertEqual(response.status_code, 200)  # volta à lista, com o erro
+            self.product.refresh_from_db()
+            self.assertIsNone(self.product.max_installments, f'{bad} não pode ser salvo')
+
+    def test_edicao_em_lista_vazio_volta_a_regra_geral(self):
+        self.product.max_installments = 6
+        self.product.save()
+        self.save_in_list('')
+        self.product.refresh_from_db()
+        self.assertIsNone(self.product.max_installments)
+
+    def test_validadores_do_model(self):
+        for bad in (0, 13):
+            self.product.max_installments = bad
+            with self.assertRaises(ValidationError):
+                self.product.full_clean()
+        self.product.max_installments = 12
+        self.product.full_clean()  # 12 é o teto e é válido
+
+    def test_configuracao_recusa_valores_fora_da_faixa(self):
+        for field, bad in (('max_installments', 0), ('max_installments', 13),
+                           ('min_installment_value', Decimal('4.99'))):
+            fresh = StoreSettings.load()
+            setattr(fresh, field, bad)
+            with self.assertRaises(ValidationError, msg=f'{field}={bad}'):
+                fresh.full_clean()
+        StoreSettings.load().full_clean()  # os padrões são válidos
+
+    def test_acao_voltar_a_regra_geral_limpa_o_limite(self):
+        other = make_variant(slug='outro').product
+        for product in (self.product, other):
+            product.max_installments = 5
+            product.save()
+        self.client.post(self.url, {
+            'action': 'reset_installments',
+            '_selected_action': [self.product.pk, other.pk],
+        })
+        self.assertEqual(Product.objects.filter(max_installments__isnull=True).count(), 2)
+
+    def test_grupo_loja_edita_parcelamento_da_configuracao_e_do_produto(self):
+        from django.contrib.auth import get_user_model
+        call_command('criar_grupos', stdout=io.StringIO())
+        staff = get_user_model().objects.create_user(
+            email='equipe@example.com', password='senha-teste-123', is_staff=True,
+        )
+        staff.groups.add(Group.objects.get(name='Loja'))
+        client = Client()
+        login_admin(client, staff)
+        settings_url = reverse('admin:loja_storesettings_change', args=[1])
+        response = client.get(settings_url)
+        self.assertContains(response, 'Parcelamento no cartão')
+        self.assertContains(response, 'Mercado Pago')  # aviso sobre a conta do gateway
+        self.assertEqual(client.get(self.url).status_code, 200)

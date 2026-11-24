@@ -11,6 +11,7 @@ from loja.models import StoreSettings
 
 from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
+from .installments import calculate_installments, get_installment_limit
 from .models import ShippingRate
 from .rate_limit import register_order, too_many_orders
 from .reservations import cancel_order_by_customer, expire_overdue_orders
@@ -80,6 +81,12 @@ def checkout(request):
         # frete cobrado é calculado de novo no servidor, em create_order().
         'shipping_table': shipping_table(),
         'shipping_rates': ShippingRate.objects.order_by('state'),
+        # Parcelas no cartão: só INFORMAÇÃO (estimativa sobre o valor dos produtos,
+        # sem frete). O limite de verdade é calculado de novo no servidor, sobre o
+        # total do pedido, quando o pagamento for criado (Etapa 8, decisão 99).
+        'installments': calculate_installments(
+            items_total, get_installment_limit([item['product'] for item in items])
+        ),
         'free_shipping_threshold': StoreSettings.load().free_shipping_threshold,
     }
     return render(request, 'pedidos/checkout.html', context)
