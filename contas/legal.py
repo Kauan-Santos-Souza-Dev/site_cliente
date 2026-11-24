@@ -22,7 +22,8 @@ from datetime import timedelta
 # .2 (v2 Etapa 5): pedido ligado à conta, exportação com pedidos, exclusão
 # bloqueada com pedido em andamento.
 # .3 (v2 Etapa 5b): o prazo de "pedido em andamento" passa a contar da ENTREGA.
-PRIVACY_POLICY_VERSION = '2026-11-22.3'
+# 2026-11-24 (v2 Etapa 7): dados do pagamento Pix e o que vai ao Mercado Pago.
+PRIVACY_POLICY_VERSION = '2026-11-24'
 TERMS_VERSION = '2026-11-22'
 
 # --- Prazos de retenção ---------------------------------------------------

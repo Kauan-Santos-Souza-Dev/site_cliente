@@ -87,11 +87,11 @@ class CheckoutTest(TestCase):
 
     def test_reserva_usa_o_prazo_da_configuracao(self):
         config = StoreSettings.load()
-        config.reservation_minutes = 10
+        config.reservation_minutes = 45
         config.save()
         self.add_to_cart(1)
         self.checkout()
-        expected = timezone.now() + timedelta(minutes=10)
+        expected = timezone.now() + timedelta(minutes=45)
         # delta: aceita alguns segundos de diferença (o tempo do próprio teste).
         self.assertAlmostEqual(Order.objects.get().expires_at, expected, delta=timedelta(seconds=10))
 
@@ -793,7 +793,7 @@ class OrderAdminTest(TestCase):
         self.assertEqual(self.client.get(reverse('admin:loja_storesettings_add')).status_code, 403)
         url = reverse('admin:loja_storesettings_delete', args=[1])
         self.assertEqual(self.client.get(url).status_code, 403)
-        StoreSettings(reservation_minutes=15).save()  # save() força o id 1
+        StoreSettings(reservation_minutes=45).save()  # save() força o id 1
         self.assertEqual(StoreSettings.objects.count(), 1)
 
 

@@ -8,6 +8,8 @@ from django.views.decorators.http import require_POST
 from carrinho.cart import Cart
 from contas.decorators import verified_email_required
 from loja.models import StoreSettings
+from pagamentos import gateway
+from pagamentos.models import Payment
 
 from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
@@ -119,6 +121,10 @@ def order_detail(request, pk):
     context = {
         'order': order,
         'whatsapp_url': build_whatsapp_url(order),
+        # Pix (v2 Etapa 7): o botão só aparece com o Mercado Pago configurado;
+        # se o Pix já foi gerado, o botão leva de volta ao QR Code.
+        'online_payment_available': gateway.is_configured(),
+        'pix_payment': order.payments.filter(method=Payment.Method.PIX).exclude(pix_code='').first(),
     }
     return render(request, 'pedidos/order_detail.html', context)
 

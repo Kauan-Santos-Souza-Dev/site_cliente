@@ -19,8 +19,18 @@
           <p><strong>Suas peças estão reservadas até {{ order.expires_at|date:"H:i" }} de {{ order.expires_at|date:"d/m" }}.</strong>
             Se o pagamento não acontecer até lá, o pedido expira e as peças voltam para a loja.</p>
         {% endif %}
-        {# O pagamento online (Pix e cartão) entra nas v2 Etapas 7 e 8. #}
-        <p>Pagamento online (Pix e cartão) em breve.</p>
+        {# Pix (v2 Etapa 7). O cartão entra na Etapa 8, ao lado deste botão. #}
+        {% if pix_payment %}
+          <p><a class="botao" href="{% url 'pix_page' order.pk %}">Ver o QR Code do Pix</a></p>
+        {% elif online_payment_available %}
+          {# POST + CSRF: gerar cobrança muda dados, nunca por um simples link. #}
+          <form method="post" action="{% url 'start_pix' order.pk %}" class="pagamento__acao">
+            {% csrf_token %}
+            <button type="submit" class="botao">Pagar com Pix (R$ {{ order.total }})</button>
+          </form>
+        {% else %}
+          <p>O pagamento online está indisponível no momento. Fale com a loja pelo WhatsApp.</p>
+        {% endif %}
         <form method="post" action="{% url 'cancel_order' order.pk %}" data-confirmar="Cancelar o pedido nº {{ order.pk }}? As peças voltam para a loja e não dá para desfazer.">
           {% csrf_token %}
           <button type="submit" class="botao botao--perigo">Cancelar pedido</button>

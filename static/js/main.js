@@ -264,6 +264,75 @@ function ativarConfirmacaoDeFormularios() {
   });
 }
 
+/**
+ * Botão "Copiar código" do Pix (data-copiar="#id-do-campo").
+ *
+ * navigator.clipboard só existe em página segura (HTTPS ou localhost). Se não
+ * existir, o botão continua escondido e a cliente copia selecionando o texto.
+ */
+function ativarBotoesCopiar() {
+  if (!navigator.clipboard) return;
+  document.querySelectorAll('[data-copiar]').forEach((botao) => {
+    const campo = document.querySelector(botao.dataset.copiar);
+    if (!campo) return;
+    botao.hidden = false;
+    botao.addEventListener('click', () => {
+      navigator.clipboard.writeText(campo.value).then(
+        () => { botao.textContent = 'Código copiado!'; },
+        () => { campo.select(); }  // sem permissão: ao menos seleciona o texto
+      );
+    });
+  });
+}
+
+/**
+ * Página do Pix: pergunta ao NOSSO servidor, a cada 5 segundos, se a situação
+ * do pedido mudou. Se mudou (pago ou expirado), recarrega a página.
+ *
+ * IMPORTANTE: isto só ATUALIZA A TELA. Quem marca o pedido como pago é o
+ * webhook do Mercado Pago, no servidor. O navegador nunca confirma nada.
+ *
+ * Economia: não pergunta com a aba escondida (visibilitychange) e para
+ * depois que o prazo do Pix passa (o servidor já terá expirado o pedido).
+ */
+function ativarPaginaPix() {
+  const caixa = document.querySelector('[data-pix]');
+  if (!caixa || !window.fetch) return;
+  const urlSituacao = caixa.dataset.statusUrl;
+  const situacaoAtual = caixa.dataset.statusAtual;
+  const expiraEm = new Date(caixa.dataset.expiraEm);
+  const aviso = caixa.querySelector('[data-pix-aviso]');
+  const INTERVALO = 5000;  // milissegundos
+  // Margem de 3 minutos depois do prazo, para o servidor expirar o pedido.
+  const PARAR_EM = expiraEm.getTime() + 3 * 60 * 1000;
+  let temporizador = null;
+
+  function perguntar() {
+    if (Date.now() > PARAR_EM) return;  // para de perguntar
+    fetch(urlSituacao, { headers: { Accept: 'application/json' } })
+      .then((resposta) => (resposta.ok ? resposta.json() : null))
+      .then((dados) => {
+        if (dados && dados.status !== situacaoAtual) {
+          aviso.textContent = 'A situação do pedido mudou. Atualizando…';
+          window.location.reload();
+          return;
+        }
+        agendar();
+      })
+      .catch(agendar);  // sem internet por um instante: tenta de novo depois
+  }
+
+  function agendar() {
+    if (!document.hidden) temporizador = window.setTimeout(perguntar, INTERVALO);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    window.clearTimeout(temporizador);
+    if (!document.hidden) perguntar();  // voltou para a aba: pergunta na hora
+  });
+  agendar();
+}
+
 ativarMenuMobile();
 ativarCabecalhoInteligente();
 ativarRevelacaoNoScroll();
@@ -272,3 +341,5 @@ ativarGaleriaProduto();
 ativarAvisoCookies();
 ativarFreteCheckout();
 ativarConfirmacaoDeFormularios();
+ativarBotoesCopiar();
+ativarPaginaPix();

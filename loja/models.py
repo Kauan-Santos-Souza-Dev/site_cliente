@@ -180,12 +180,15 @@ class StoreSettings(models.Model):
         CUSTOMER_PAYS = 'customer_pays', 'A cliente paga os juros'
 
     # Quanto tempo as peças ficam reservadas para um pedido não pago (decisão 58).
+    # Mínimo de 30 minutos desde a v2 Etapa 7 (decisão 103): é o menor prazo
+    # que o Mercado Pago aceita para um Pix, e o Pix usa este mesmo prazo.
     reservation_minutes = models.PositiveIntegerField(
         'reserva do estoque (minutos)',
         default=30,
-        validators=[MinValueValidator(5), MaxValueValidator(24 * 60)],
-        help_text='Tempo para pagar. Depois disso o pedido expira e as peças voltam ao estoque. '
-                  'Entre 5 e 1440 minutos.',
+        validators=[MinValueValidator(30), MaxValueValidator(24 * 60)],
+        help_text='Tempo para pagar. Também é o prazo do Pix. Depois disso o pedido expira e as '
+                  'peças voltam ao estoque. Entre 30 e 1440 minutos (o Mercado Pago não aceita '
+                  'Pix com menos de 30).',
     )
     # Frete grátis a partir deste valor em produtos (decisão 54). Vazio = nunca grátis.
     free_shipping_threshold = models.DecimalField(

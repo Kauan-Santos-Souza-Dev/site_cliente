@@ -121,6 +121,9 @@ Depois: `python manage.py migrate`, `python manage.py carregar_exemplos`, `pytho
 | `STORE_LEGAL_NAME`, `STORE_CNPJ`, `STORE_ADDRESS` | Identificação do fornecedor (Decreto 7.962/2013). **Vazias** enquanto não houver CNPJ; nunca CPF nem endereço residencial (decisão 85) |
 | `EMAIL_BACKEND` | Vazio = e-mails só no terminal (desenvolvimento). Produção: SMTP do Brevo (a configurar) |
 | `DEFAULT_FROM_EMAIL` | Remetente dos e-mails (vazio = `Elegância Cristã <nao-responder@localhost>`) |
+| `MERCADOPAGO_ACCESS_TOKEN` | Access Token do Mercado Pago (**de teste** no desenvolvimento). Vazio = pagamento online desligado |
+| `MERCADOPAGO_WEBHOOK_SECRET` | Assinatura secreta do webhook, gerada no painel do Mercado Pago (v2 Etapa 7b) |
+| `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME` | **Só no sandbox:** `APRO` faz o Pix de teste ser aprovado sozinho. Em produção, **vazio** |
 
 ## Estrutura de pastas
 ```
@@ -164,6 +167,12 @@ PROJETO/
 │   ├── rate_limit.py  # limite de pedidos por IP (anti-robô)
 │   ├── admin.py       # painel de pedidos (ações de status) e tabela de frete
 │   └── management/commands/expirar_pedidos.py  # para um agendador chamar
+├── pagamentos/      # (v2) pagamento pelo Mercado Pago
+│   ├── models.py      # Payment: IDs do gateway, situação, valor, prazo e "copia e cola" (sem dado pessoal)
+│   ├── gateway.py     # ÚNICO arquivo que usa o SDK do Mercado Pago (simulado nos testes)
+│   ├── pix.py         # start_pix_payment: cria/reaproveita o Pix e alinha os prazos
+│   ├── views.py       # Pagar com Pix, página do QR Code e situação em JSON
+│   └── admin.py       # lista de pagamentos, só consulta
 ├── templates/
 │   ├── base.html      # cabeçalho, menu e rodapé de todas as páginas
 │   ├── 404.html       # página "não encontrada" (com DEBUG=False)
@@ -173,10 +182,11 @@ PROJETO/
 │   ├── contas/        # login, cadastro, verificação, senha, bloqueio, Minha conta (account*)
 │   │   └── email/     # textos dos e-mails (verificação, aviso de cadastro, nova senha, troca de e-mail)
 │   ├── pedidos/       # checkout, my_orders, order_detail e _campo.html (campo com rótulo e erro)
+│   ├── pagamentos/    # pix.html (QR Code, "copia e cola" e prazo)
 │   └── admin/contas/  # anonymize_confirmation.html (confirmação da ação "Anonimizar contas")
 ├── static/
 │   ├── css/style.css  # todo o visual do site
-│   ├── js/main.js     # menu mobile, animações de scroll e aviso de cookies
+│   ├── js/main.js     # menu mobile, animações de scroll, aviso de cookies e página do Pix (copiar e atualizar)
 │   ├── fonts/         # fontes WOFF2 + licenças (OFL)
 │   └── img/           # logo em WebP e favicon
 ├── media/           # fotos enviadas pelo admin (fora do Git)
@@ -627,6 +637,49 @@ A página do produto (`loja/views.py::product_detail`) usa as mesmas duas funç�
 **Checklist sandbox → produção:** a política de juros do site precisa ser **igual** à da conta do Mercado Pago (o
 "sem juros" é configurado lá, não pela API). Veja o checklist no fim deste arquivo.
 
+### Pagamento com Pix (app `pagamentos/`) — v2 etapa 7a
+A cliente gera um Pix com **QR Code dinâmico** e "copia e cola" no detalhe do pedido (decisões 100 a 105). É uma
+cobrança **imediata** do Mercado Pago (Orders API), **não** o "Pix Automático" de cobranças recorrentes.
+**Nesta parte (7a) o pedido ainda não vira "pago"**: quem confirma é o webhook, na Etapa 7b.
+
+**Regras principais:**
+- Só o arquivo `pagamentos/gateway.py` fala com o Mercado Pago (SDK oficial `mercadopago` 3.6.0). Nos testes ele é simulado.
+- Um Pix por pedido. Clicar de novo reaproveita o mesmo; a chave de idempotência evita cobrança duplicada no gateway.
+- **Prazos (decisão 103):** o Pix vale `reservation_minutes` (mínimo 30) e o pedido passa a expirar **2 minutos depois**.
+  Exemplo, com 30 min: Pix gerado às 14:00 → Pix vence às 14:30, pedido às 14:32.
+- Vai ao Mercado Pago só o **e-mail** da conta e o **valor**. Sem CPF, nome ou endereço. No banco fica o `Payment`:
+  IDs do gateway, situação, valor, prazo e o "copia e cola".
+- A página do QR pergunta ao **nosso** servidor, a cada 5 s, se o pedido mudou. O navegador só atualiza a tela; nunca confirma pagamento.
+
+**Caminho de "Pagar com Pix" (POST):**
+```
+POST /pagamentos/pedido/<id>/pix/gerar/ → config/urls.py → pagamentos/urls.py → pagamentos/views.py::start_pix
+  → @login_required + get_object_or_404(request.user.orders, pk=id)     404 se não for da conta (IDOR)
+  → gateway.is_configured()                                            sem token no .env: "indisponível"
+  → pagamentos/pix.py::start_pix_payment(order)
+       1. transaction.atomic + select_for_update no Order               aguardando e dentro do prazo?
+          → Payment.objects.get_or_create(order, método pix)             status "criando", chave de idempotência
+       2. gateway.create_pix_order(...)  (sem trava)                     POST /v1/orders no Mercado Pago (SDK)
+          → build_pix_order_body: valor em texto, "PT30M", só o e-mail
+       3. transaction.atomic + select_for_update                         grava IDs, "copia e cola", prazo do Pix
+          → Order.expires_at = Pix + 2 min                               (Order.save aplica a tabela de transições)
+  → redirect /pagamentos/pedido/<id>/pix/ → views.pix_page
+       → make_qr_svg(pix_code) (biblioteca qrcode) → templates/pagamentos/pix.html
+       → static/js/main.js::ativarPaginaPix → GET .../pix/situacao/ a cada 5 s → views.pix_status (JSON do nosso banco)
+```
+
+**Testar no sandbox (7a):**
+1. Crie uma aplicação em [Suas integrações](https://www.mercadopago.com.br/developers/panel/app) (pode ser na sua conta de
+   pessoa física) e copie o **Access Token de teste** para `MERCADOPAGO_ACCESS_TOKEN` no `.env`. Se a Orders API recusar
+   (a documentação se contradiz sobre isso, decisão 100), crie um **usuário de teste vendedor** no painel e use as credenciais dele.
+2. `pip install -r requirements.txt` e faça o backup do banco antes de `python manage.py migrate` (migrations `loja/0006` e
+   `pagamentos/0001`). Depois, `python manage.py criar_grupos` (o grupo "Loja" ganha "ver pagamentos").
+3. `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME=APRO` no `.env` (o Mercado Pago aprova o Pix de teste sozinho).
+4. Faça um pedido → detalhe do pedido → **"Pagar com Pix"** → a página mostra o QR e o "copia e cola".
+5. Confira no painel do Mercado Pago (modo Teste → pagamentos de teste) e no admin (**Pagamentos**). Se o Mercado Pago
+   recusar, o terminal do `runserver` mostra só `"criar Pix" recusado (HTTP 4xx)`.
+6. O pedido continua "aguardando pagamento" até a Etapa 7b (webhook).
+
 ## Dados pessoais que o site guarda (LGPD)
 Inventário real, por tabela e campo. A Política de Privacidade e a exclusão de conta se baseiam nele:
 **se o site passar a guardar outro dado, atualize esta tabela, a Política e `contas/privacy.py`.**
@@ -636,6 +689,7 @@ Inventário real, por tabela e campo. A Política de Privacidade e a exclusão d
 | `contas_user` (`contas.User`) | `first_name`, `last_name`, `email`, `password` (só hash Argon2), `last_login`, `date_joined`, `email_verified`, `last_email_sent_at`, `anonymized_at` | Enquanto a conta existir; exclusão = anonimização. Nunca verificada: apagada após 30 dias |
 | `contas_consent` (`Consent`) | `user`, versões aceitas, `accepted_at` | Fica como prova do aceite (sem dado pessoal depois da anonimização) |
 | `pedidos_order` (`Order`) | `user` (a conta), `customer_name`, `phone`, `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state` | 5 anos, depois anonimizado (ficam cidade e UF). Continua ligado à conta anonimizada. Entra na exportação |
+| `pagamentos_payment` (`Payment`) | nenhum dado pessoal: pedido, IDs do Mercado Pago, situação, valor, prazo e "copia e cola". O e-mail vai ao Mercado Pago, mas não é copiado aqui | Junto com o pedido (registro financeiro) |
 | `django_session` | carrinho, id da conta, dispositivo 2FA, id do último pedido (codificados) | 14 dias + `clearsessions` |
 | `axes_accessattempt` | e-mail digitado, IP, navegador, caminho, horário | 30 dias |
 | `axes_accesslog` | (desligado: não grava mais) | esvaziado pelo comando |
@@ -657,6 +711,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
 | `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97). **v2 Etapa 6:** parcelas (limite, parcela mínima, soma exata dos centavos em 1x a 12x, `Decimal`, política "cliente paga"); menor limite do carrinho; produto com limite maior que o geral em compra pequena (a parcela mínima vence); páginas do produto e do checkout (estimativa, nunca "sem juros"); admin (edição em lista recusa 0 e 13, ação "voltar à regra geral", grupo "Loja") |
+| `pagamentos/tests.py` | **v2 Etapa 7a** (Mercado Pago simulado): corpo do Pix (valor em texto, `PT30M`, só e-mail, sem CPF, `APRO` só se configurado, `float` recusado); erro e falha de rede viram mensagem genérica e log sem token/e-mail; gerar Pix (prazos Pix + 2 min, reserva renovada, configuração da loja, reaproveita no 2º clique, mesma chave de idempotência após falha); 404 para outra conta, pedido da v1 e inexistente; não gera Pix para pedido cancelado, expirado ou vencido; só POST; login; sem token = indisponível; nunca marca "pago"; página do QR e situação em JSON (só lê o banco, `never_cache`, 404 para outra conta); reserva mínima de 30 min |
 | `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança
@@ -666,7 +721,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `DEBUG` padrão `False`; HTTPS, cookies seguros e HSTS ligados com `DEBUG=False` | `config/settings.py` |
 | Banco só pelo ORM (sem SQL escrito à mão); usuário MySQL com acesso a um único banco | models, README (instalação) |
 | CSRF em todo formulário POST | templates (`{% csrf_token %}`), `CsrfViewMiddleware` |
-| Escape automático nos templates (nenhum filtro `safe`) | `templates/` |
+| Escape automático nos templates (único `safe`: o SVG do QR Code, gerado pela biblioteca `qrcode`) | `templates/`, `pagamentos/views.py::make_qr_svg` |
 | Validação de entrada com Forms; upload só JPG/PNG/WebP até 2 MB | `pedidos/forms.py`, `carrinho/forms.py`, `loja/validators.py` |
 | API somente leitura, fechada por padrão, sem estoque exato, limite de 60 req/min | `loja/api_views.py`, `REST_FRAMEWORK` |
 | Pedido só visível para a dona (contra IDOR): consulta sempre por `request.user.orders`, 404 igual para tudo | `pedidos/views.py::my_orders`, `order_detail` |
@@ -676,6 +731,11 @@ Ou só os de um app: `python manage.py test pedidos`.
 | Link do WhatsApp sem dado pessoal na URL | `pedidos/whatsapp.py` |
 | Anonimizar pelo admin: só superusuária, com confirmação, pula equipe e pedido ativo | `contas/admin.py::UserAdmin.anonymize_accounts` |
 | Limite de 5 pedidos por hora por IP | `pedidos/rate_limit.py` |
+| Pix: chaves do Mercado Pago só no `.env`; nunca em log; log sem e-mail, valor ou "copia e cola" | `config/settings.py`, `pagamentos/gateway.py` |
+| Pix: só a dona do pedido gera e vê o Pix (404 igual para tudo); gerar só por POST + CSRF | `pagamentos/views.py` |
+| Pix: nenhuma tela marca "pago"; a página só lê a situação no nosso banco | `pagamentos/views.py::pix_status` |
+| Pix: sem cobrança duplicada (chave de idempotência gravada antes da chamada) e sem trava do banco durante a rede | `pagamentos/pix.py` |
+| Pix: sem CPF; vai ao gateway só o e-mail e o valor | `pagamentos/gateway.py::build_pix_order_body` |
 | LGPD: só os dados necessários, aviso no checkout, Política e Termos (rascunhos versionados) | `templates/pedidos/checkout.html`, `templates/loja/privacy.html`, `templates/loja/terms.html` |
 | Aceite registrado (versão + data/hora), caixa desmarcada | `contas/models.py::Consent`, `contas/views.py::record_consent` |
 | Minha conta sem id na URL: só a própria conta (contra IDOR) | `contas/views.py`, `contas/urls.py` |
@@ -705,6 +765,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] **Agendar** `python manage.py expirar_pedidos` a cada 5 minutos (decisão 88). Sem ele, a reserva vencida só é liberada quando alguém abre o produto, o carrinho, o checkout ou "Meus pedidos".
 - [ ] Backup do banco (`mysqldump`) antes de cada `migrate` em produção.
 - [ ] **Parcelamento:** a "política de juros" do admin (Configuração da loja) é igual à configurada na **conta do Mercado Pago**; se for "a cliente paga", a **revisão jurídica** cobre a informação sobre juros (CDC, art. 52); na Etapa 8, o limite de parcelas é calculado no servidor e congelado no pedido, nunca vindo do navegador (decisão 99).
+- [ ] **Mercado Pago (v2 Etapa 7):** trocar o Access Token de teste pelo de **produção**; configurar o webhook de **produção** no painel (URL do site) e pôr a nova assinatura secreta no `.env`; deixar `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME` **vazio**; fazer um Pix real de valor baixo e estornar.
 - [ ] Banco com usuário **dedicado** (nunca `root`) e senha forte, diferente da de desenvolvimento (decisão 70).
 - [ ] **E-mail de verdade:** configurar o SMTP do Brevo (`EMAIL_BACKEND` e credenciais no `.env`) e um `DEFAULT_FROM_EMAIL` de um domínio da loja. Com o backend de console, ninguém recebe o link de verificação nem o de nova senha.
 - [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**, rodar `configurar_2fa` e guardar os códigos de backup; rodar `criar_grupos`.
@@ -722,7 +783,7 @@ Passos práticos se houver suspeita de que alguém acessou dados que não devia 
 2. **Trocar chaves e senhas** (na ordem):
    - `SECRET_KEY` (derruba todas as sessões e invalida os links de verificação e de nova senha);
    - senha do usuário do MySQL (`DB_PASSWORD`);
-   - chaves do Mercado Pago (quando existirem, Etapas 7 e 8) e a senha/chave SMTP do Brevo;
+   - Access Token e assinatura do webhook do Mercado Pago (gerar novos no painel) e a senha/chave SMTP do Brevo;
    - senha e 2FA da conta da dona (`configurar_2fa --redefinir`).
 3. **Avaliar o risco:** quais dados (use a tabela "Dados pessoais que o site guarda"), de quantas pessoas, desde quando.
    Senhas estão em hash Argon2, mas, se o banco vazou, vale pedir às clientes que troquem a senha.

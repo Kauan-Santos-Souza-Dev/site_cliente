@@ -36,6 +36,9 @@ GROUP_PERMISSIONS = {
     ('pedidos', 'orderitem'): ['view'],
     # Tabela de frete por UF (decisão 90).
     ('pedidos', 'shippingrate'): ['add', 'change', 'delete', 'view'],
+    # Pagamentos (v2 Etapa 7): só consulta. Quem muda a situação é o site,
+    # conversando com o Mercado Pago (decisão 102).
+    ('pagamentos', 'payment'): ['view'],
 }
 
 

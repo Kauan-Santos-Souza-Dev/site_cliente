@@ -21,6 +21,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 5 | Pedido ligado à conta, status, reserva de estoque, frete, Meus pedidos | 86 a 94 (e atualiza 44, 46, 78 e 80) |
 | v2 · 5b | Status "entregue", cancelamento pela cliente, devolução manual de estoque | 95 a 97 (e atualiza 87 e 92) |
 | v2 · 6 | Parcelamento configurável: regra geral, limite por produto, cálculo, juros e gateway | 98 e 99 (e atualiza 56 e 57) |
+| v2 · 7a | Pix: Orders API, SDK, model `Payment`, prazos, tela do QR, CPF | 100 a 105 (e atualiza 53, 58, 59, 88 e 89) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -278,12 +279,13 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 
 > As decisões 53 a 63 são as respostas de negócio da loja às perguntas da v2 Etapa 1. Cada uma diz em que etapa será implementada.
 
-## 53. Gateway: Mercado Pago — v2 Etapa 1
+## 53. Gateway: Mercado Pago — v2 Etapa 1 (atualizada na v2 Etapa 7)
 - **Escolha:** Mercado Pago. **Cartão pelo Checkout Pro** (a cliente digita o cartão na página do Mercado Pago) e **Pix pela API de pagamentos**, com QR Code dinâmico e "copia e cola" exibidos no nosso site. Começa no sandbox, com contas de teste.
 - **Por quê:** aceita pessoa física; o Checkout Pro tira o cartão do nosso servidor; o webhook vem assinado com HMAC; tem SDK Python oficial (decisão 52).
 - **Custo aceito:** é o mais caro no cartão. A taxa depende do prazo de recebimento escolhido na conta.
 - **Descartado:** Asaas (sem SDK Python, webhook com token fixo, cartão só pela fatura hospedada), Efí (mTLS no webhook) e Pagar.me (exige CNPJ).
 - **Implementação:** v2 Etapas 7 (Pix) e 8 (cartão). O SDK `mercadopago` será pedido para aprovação na Etapa 7.
+- **Atualização (v2 Etapa 7):** o Pix usa a **Orders API** (`/v1/orders`), não a "API de pagamentos" (`/v1/payments`), que a documentação atual chama de *legacy* (decisão 100). O SDK foi aprovado (decisão 101).
 
 ## 54. Frete por tabela de UF, com frete grátis acima de um valor — v2 Etapa 1
 - **Escolha:** o frete vem de uma **tabela por região/UF editável no admin**, com **frete grátis acima de um valor** também editável. Nenhum valor fica fixo no código. Os dados iniciais são **exemplos provisórios**, marcados assim no admin e no README, para a loja trocar.
@@ -306,15 +308,17 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** valores iniciais da regra geral: **até 3x** e **parcela mínima de R$ 50,00**, ambos editáveis no admin (e o máximo pode ser sobrescrito por produto). Exemplo: num carrinho de R$ 120, a parcela mínima permite no máximo 2x (2 × R$ 60).
 - **Implementação:** v2 Etapa 6 (`StoreSettings` + função de cálculo, decisão 98). O máximo vai para o Checkout Pro na Etapa 8.
 
-## 58. Pix expira em 30 minutos e devolve o estoque — v2 Etapa 1
+## 58. Pix expira em 30 minutos e devolve o estoque — v2 Etapa 1 (atualizada na v2 Etapa 7)
 - **Escolha:** a cobrança Pix expira em **30 minutos** (configurável). Quando expira, o pedido vira "expirado" e o estoque reservado volta.
 - **Por quê:** um pedido não pago prende peças que outra cliente poderia comprar. Trinta minutos dá tempo de abrir o app do banco sem segurar o estoque por muito tempo.
 - **Implementação:** v2 Etapa 5 (reserva e expiração) e Etapa 7 (data de expiração enviada ao Mercado Pago).
+- **Atualização (v2 Etapa 7):** o Pix expira em `reservation_minutes` (mínimo 30, o menor prazo aceito pelo Mercado Pago) e o pedido **2 minutos depois** (decisão 103).
 
-## 59. CPF não é armazenado — v2 Etapa 1
+## 59. CPF não é armazenado — v2 Etapa 1 (atualizada na v2 Etapa 7)
 - **Escolha:** o site **não guarda CPF**. No cartão, o Checkout Pro pede o CPF na página do Mercado Pago. No Pix, se o Mercado Pago exigir o CPF do pagador, ele é pedido no momento do pagamento e enviado direto ao gateway, sem ir para o banco de dados nem para os logs.
 - **Por quê:** LGPD, princípio da necessidade: o CPF não serve para nada na loja. Dado que não guardamos não pode vazar.
 - **Pendente:** confirmar no sandbox se o Pix exige o CPF (v2 Etapa 7). O resultado será informado ao Kauan.
+- **Atualização (v2 Etapa 7):** a documentação atual da Orders API não exige CPF no Pix e o código **não envia** CPF (decisão 105). Falta só a confirmação no sandbox.
 
 ## 60. Troca e estorno: mínimo legal + estorno total no admin — v2 Etapa 1
 - **Regra legal (CDC, art. 49):** na compra pela internet, a cliente pode desistir em até **7 dias corridos após receber** o produto, com devolução **integral** do valor pago (inclusive o frete). O frete de devolução é por conta da loja.
@@ -540,11 +544,13 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - (b) A devolução usa `F('stock') + qtd`.
   - (c) As variações são travadas e atualizadas **em ordem de id** no checkout e na devolução, para evitar *deadlock* (dois processos esperando um pelo outro).
 - **Pendência para a Etapa 7:** pagamento que chega depois de o pedido expirar. O Pix será criado no Mercado Pago com o mesmo `expires_at`, e o caso residual vira estorno.
+  - **v2 Etapa 7a:** o Pix expira 2 minutos **antes** do pedido (decisão 103). O estorno do caso residual fica na Etapa 7b.
 - **Descartado:** Celery/fila de tarefas (infraestrutura demais para uma loja pequena); expirar só pela página (sem garantia de que alguém abra).
 
-## 89. `StoreSettings`: configuração única da loja no admin — v2 Etapa 5
+## 89. `StoreSettings`: configuração única da loja no admin — v2 Etapa 5 (atualizada na v2 Etapa 7)
 - **Escolha:** `loja.StoreSettings`, uma linha só (o `save()` força `id=1`; `StoreSettings.load()` lê ou cria).
   - Campos desta etapa: `reservation_minutes` (5 a 1440) e `free_shipping_threshold` (com marca de provisório).
+  - **v2 Etapa 7:** `reservation_minutes` passa a ir de **30** a 1440 (decisão 103). A migration `loja/0006` sobe para 30 qualquer valor menor.
   - A v2 Etapa 6 acrescenta o parcelamento aqui.
 - **Admin:** sem "adicionar" quando a linha existe e sem "excluir". O grupo "Loja" pode ver e editar.
 - **Por que no app `loja`:** são regras da loja inteira (frete, reserva, parcelas), não de um app só.
@@ -659,3 +665,60 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **PENDÊNCIA DA ETAPA 8 (segurança):** o limite de parcelas enviado ao Mercado Pago deve ser **calculado no servidor**, sobre o **total do pedido** (produtos + frete), com `get_installment_limit` + `calculate_installments`, e **congelado no pedido na criação** (novo campo no `Order`, como o `shipping_cost`). **Nunca aceitar o número de parcelas, o limite ou o valor da parcela vindos do navegador.** Hoje o checkout só exibe a estimativa; nenhum dado de parcelas é enviado nem aceito pelo servidor.
 - **PENDÊNCIA PARA A REVISÃO JURÍDICA:** se a política virar "a cliente paga os juros", a informação ao consumidor sobre juros no parcelamento (**CDC, art. 52**: preço à vista, taxa de juros, acréscimos, número e periodicidade das prestações, soma total a pagar) precisa estar nas telas e nos Termos. Hoje os textos são genéricos, de propósito, e a política padrão é a loja absorver.
 - **Descartado:** calcular juros do gateway no site (a taxa é do Mercado Pago e pode mudar); mostrar "sem juros" nas telas (a promessa depende da conta do gateway, que o site não controla); arredondar cada parcela (a soma não bate); mostrar parcelas no carrinho (sem frete o valor mente).
+
+## 100. Pix pela Orders API do Mercado Pago — v2 Etapa 7
+- **Escolha:** o Pix é criado com `POST /v1/orders` (Orders API) e, na Etapa 7b, consultado (`GET /v1/orders/{id}`), cancelado (`/cancel`) e estornado (`/refund`). **Atualiza a decisão 53**, que falava em "API de pagamentos".
+- **Por quê:** a página atual de Pix do Checkout API (consultada em 24/11/2026) usa a Orders API. A Payments API (`/v1/payments`) aparece como *legacy*: continua funcionando, mas "deixou de adicionar novas funcionalidades". O README do SDK oficial também recomenda a Orders API, e o teste do Pix no sandbox está documentado nela (`payer.first_name = "APRO"` aprova sozinho).
+- **O que muda para nós:**
+  - O "copia e cola" vem em `transactions.payments[0].payment_method.qr_code`.
+  - O prazo vai como duração ISO 8601 (`expiration_time: "PT30M"`), de 30 minutos a 30 dias.
+  - O cabeçalho `X-Idempotency-Key` é **obrigatório**.
+  - O webhook é configurado **no painel** (evento "Order"), não por campo no pedido (Etapa 7b).
+- **A confirmar no sandbox:** qual credencial funciona (a documentação se contradiz: "Access Token de teste" na página do Pix x "use usuários de teste com credenciais de produção" na referência da Orders API) e se o CPF é exigido (decisão 105).
+- **Descartado:** Payments API (sem novidades; a migração para Orders seria trabalho repetido depois).
+- **Fontes:** [Pix (Orders)](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/websites/pix), [criar order](https://www.mercadopago.com.br/developers/pt/reference/online-payments/checkout-api/create-order/post), [status da order](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-management/status/order-status), [migração Payments → Orders](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/resources/migrate-payments-to-orders), [teste do Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/integration-test/pix).
+
+## 101. SDK oficial `mercadopago` 3.6.0, isolado em `pagamentos/gateway.py` — v2 Etapa 7
+- **Escolha:** `mercadopago==3.6.0` (publicado em 10/09/2026), aprovado pelo Kauan no plano. A 3.6.1 saiu em 24/11/2026, o dia desta etapa, e ficou de fora pela regra de "versão publicada há mais de 14 dias".
+- **Dependências fixadas no `requirements.txt`** (datas conferidas no PyPI, todas até 09/11/2026): `requests==2.34.2`, `urllib3==2.8.0`, `idna==3.20`, `certifi==2026.10.23`, `charset-normalizer==3.5.2`.
+- **Por que o SDK e não `requests` direto:**
+  - `sdk.order().create/get/cancel/refund` já monta URL, cabeçalhos e corpo.
+  - O validador de assinatura do webhook (`WebhookSignatureValidator`) é mantido pelo próprio Mercado Pago. A documentação não traz o texto exato que entra no HMAC; o SDK traz (Etapa 7b).
+  - O SDK traz o `requests` de qualquer jeito: a diferença em dependências é só o próprio SDK.
+- **Isolamento:** só `pagamentos/gateway.py` importa o SDK, e o import fica **dentro das funções**. O resto do site chama funções simples e recebe um `GatewayOrder` (dataclass). Os testes simulam essas funções com `mock.patch`: nenhuma chamada de rede.
+- **Erros:** código HTTP fora de 200/201, ou falha de rede, vira `GatewayError` com mensagem genérica. O log registra só a operação e o código HTTP (nunca o corpo, que traz o e-mail da pagadora).
+- **Descartado:** `requests` direto (manter à mão o que o SDK já faz, inclusive o manifesto da assinatura); a 3.6.1 (nova demais).
+
+## 102. Model `pagamentos.Payment`: só IDs, status, valor e prazos — v2 Etapa 7
+- **Escolha:** app novo, `pagamentos`, com o model `Payment` ligado ao pedido (`ForeignKey`, `PROTECT`). Campos: forma (`pix`), situação própria (criando, pendente, aprovado, cancelado, expirado, divergente, estorno pendente, estornado, estorno falhou), valor **congelado** na criação, chave de idempotência (UUID), IDs e status do Mercado Pago, "copia e cola", prazo do Pix e data da aprovação.
+- **Um Pix por pedido:** `UniqueConstraint(order, method)`, **sem condição** (o MySQL não aceita as condicionais). Basta um, porque quando o Pix expira o pedido expira junto (decisão 103).
+- **O que NÃO fica:** CPF, nome, e-mail, dados bancários, a imagem `qr_code_base64` (o QR é desenhado por nós) e o corpo das respostas do gateway.
+- **"Copia e cola" guardado (`pix_code`):** não é dado da cliente; é o código da cobrança da loja e morre com o Pix. Guardar evita consultar o Mercado Pago a cada visita à página do QR.
+- **Chave de idempotência gravada antes da chamada:** se a 1ª tentativa cair no meio, a 2ª manda a mesma chave e o Mercado Pago devolve a mesma cobrança, sem duplicar.
+- **Admin:** só consulta (sem adicionar, editar ou apagar). O grupo "Loja" ganhou só `view_payment` (agora 24 permissões).
+- **Situação do `Payment` separada do status do pedido:** um pagamento pode estar "aprovado" com o pedido "expirado" (pagamento tardio, Etapa 7b).
+- **Descartado:** guardar a resposta inteira do gateway (traz dados pessoais); campos de pagamento direto no `Order` (a Etapa 8 traz o cartão, e um pedido pode ter tentativas de formas diferentes).
+
+## 103. Prazo do Pix x reserva: o servidor manda, Pix 2 minutos antes — v2 Etapa 7
+- **Quem manda:** o **nosso** `Order.expires_at`. O Pix é criado para expirar **antes** do pedido.
+- **Regra (`pagamentos/pix.py`):** ao gerar o Pix, ele vale **N minutos** (`StoreSettings.reservation_minutes`) e o pedido passa a expirar em **agora + N + 2 minutos** (`ORDER_EXPIRY_MARGIN`). Quando a nossa expiração devolve as peças, o Pix já não aceita pagamento.
+- **Reserva renovada uma vez:** o Pix é gerado depois do checkout (a cliente pode demorar a clicar). Sem renovar, ela poderia receber um Pix de 30 minutos para um pedido que vence em 5. Como só existe um Pix por pedido, a renovação acontece uma vez. **Consequência aceita:** no pior caso, a peça fica presa ~2N minutos.
+- **Mínimo de 30 minutos:** o menor prazo que o Mercado Pago aceita. `reservation_minutes` passou de 5–1440 para **30–1440** (atualiza a decisão 89; a migration `loja/0006` sobe valores menores para 30). `pix_minutes()` ainda usa `max(N, 30)` por segurança.
+- **Três passos, sem segurar a trava durante a rede:** (1) com `select_for_update()` no pedido, confere "aguardando e dentro do prazo" e cria o `Payment` "criando"; (2) sem trava, chama o Mercado Pago; (3) com trava, grava IDs e prazos. Clique duplo: as duas requisições mandam a mesma chave de idempotência e só a primeira grava no passo 3.
+- **Na Etapa 7b:** pagamento que chega depois de expirar ou cancelar vira estorno automático com aviso à dona; cancelar o pedido cancela o Pix no gateway. A expiração **não** chama o gateway (seria rede dentro de páginas comuns): pela margem, o Pix já expirou sozinho.
+- **Descartado:** Pix com o mesmo prazo do pedido (sem margem, um pagamento no último segundo chegaria com as peças já devolvidas); criar o Pix no checkout (a Etapa 8 põe a escolha entre Pix e cartão no detalhe do pedido).
+
+## 104. Tela do Pix: QR desenhado por nós e consulta só ao nosso banco — v2 Etapa 7
+- **Onde:** no detalhe do pedido, enquanto "aguardando pagamento", o botão **"Pagar com Pix"** (POST + CSRF; a Etapa 8 põe o cartão ao lado). Ele leva a `/pagamentos/pedido/<id>/pix/`: QR Code, "copia e cola" com botão "Copiar", valor e prazo. Depois de gerado, o detalhe mostra "Ver o QR Code do Pix".
+- **QR Code:** desenhado em SVG pela biblioteca `qrcode` (instalada na Etapa 3) a partir do "copia e cola". O SVG entra na página com `|safe`: ele sai da biblioteca e só tem um `<path>` com coordenadas, então o conteúdo do Pix não tem como injetar HTML. É o **único** `|safe` do projeto.
+- **Como a tela descobre que pagou:** o JavaScript consulta a cada 5 segundos `GET /pagamentos/pedido/<id>/pix/situacao/`, que devolve só `{"status": ...}` lido do **nosso banco**. Quando muda, a página recarrega. Essa rota **não fala com o Mercado Pago e não confirma nada**; quem muda o pedido para "pago" é o webhook (Etapa 7b). A única escrita possível nela é a expiração "preguiçosa" (decisão 88). Para de perguntar com a aba escondida e depois do prazo; `@never_cache` impede o navegador de reaproveitar uma resposta velha. Sem JavaScript: link "Já paguei, atualizar".
+- **Segurança:** todas as rotas com `@login_required` e busca por `request.user.orders` (IDOR: outra conta, pedido da v1 ou inexistente dão 404). Pedido que não aguarda pagamento ou já vencido não gera Pix.
+- **Sem Access Token no `.env`:** o botão some e aparece "pagamento online indisponível". O site funciona sem o Mercado Pago configurado.
+- **Erros genéricos na tela:** "Não foi possível gerar o Pix agora. Tente de novo em instantes."
+- **Descartado:** a imagem `qr_code_base64` do gateway (mais um dado guardado, imagem `data:` grande); o `ticket_url` (página externa); consultar o Mercado Pago a partir da tela (o navegador passaria a disparar chamadas ao gateway, e só o webhook confirma).
+
+## 105. CPF no Pix: não enviado; confirmação no sandbox pendente — v2 Etapa 7
+- **Situação:** a documentação atual do Pix na Orders API manda só `payer.email` (e `first_name` no exemplo de teste). Nenhuma página consultada exige CPF. O código envia **só o e-mail** da conta (`gateway.build_pix_order_body`), e um teste garante que não há `identification` no corpo.
+- **Sandbox:** `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME=APRO` faz o Mercado Pago aprovar o Pix de teste sozinho. Em produção a variável fica **vazia** e nenhum nome é enviado.
+- **Pendente:** gerar um Pix no sandbox com as credenciais do Kauan e confirmar que o Mercado Pago não recusa por falta de CPF. Se exigir, o CPF será pedido na tela do Pix e enviado **direto** ao gateway, sem ir ao banco nem aos logs (decisão 59), com nova aprovação do Kauan.
+- **Política de Privacidade:** passou a dizer o que vai ao Mercado Pago no Pix (e-mail e valor) e o que fica no `Payment`. Versão `2026-11-24` (a pendência de reaceite da decisão 95 continua valendo).

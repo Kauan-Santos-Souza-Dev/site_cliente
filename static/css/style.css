@@ -1155,6 +1155,54 @@ main:focus {
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
 }
 
+/* 7.10) Pagamento com Pix (v2 Etapa 7) ------------------------------------- */
+.pagamento__acao {
+  margin: 1rem 0;
+}
+.pix {
+  margin: 1.5rem 0 2rem;
+  padding: 1.5rem;
+  border-radius: var(--raio);
+  background: var(--cor-principal-clara);
+}
+.pix__passos {
+  margin: 1rem 0;
+  padding-left: 1.25rem;
+}
+/* O QR fica SEMPRE com fundo branco e margem: o app do banco lê melhor. */
+.pix__qr {
+  width: min(100%, 16rem);
+  margin: 1.25rem auto;
+  padding: 0.75rem;
+  border-radius: var(--raio);
+  background: #fff;
+}
+.pix__qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pix__rotulo {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+}
+/* O código é longo e sem espaços: quebra em qualquer ponto para caber no celular. */
+.pix__codigo {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem;
+  border: 1px solid var(--cor-borda);
+  border-radius: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  resize: none;
+}
+.pix__aviso:empty {
+  display: none;
+}
+
 /* 7.4) Contato ------------------------------------------------------------- */
 .grade--contato {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

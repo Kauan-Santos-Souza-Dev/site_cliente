@@ -13,6 +13,8 @@ urlpatterns = [
     path('carrinho/', include('carrinho.urls')),
     # Checkout e confirmação do pedido (etapa 7).
     path('pedido/', include('pedidos.urls')),
+    # Pagamento pelo Mercado Pago: Pix (v2 Etapa 7).
+    path('pagamentos/', include('pagamentos.urls')),
     # Contas de clientes: cadastro, login e logout (v2 Etapa 2).
     path('conta/', include('contas.urls')),
     # include() "pendura" as rotas do app loja na raiz do site.

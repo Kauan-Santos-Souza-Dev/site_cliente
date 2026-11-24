@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% comment %}
+  Página do Pix (view pagamentos.views.pix_page, v2 Etapa 7, decisão 104).
+  - O QR Code é desenhado pelo servidor (SVG) a partir do "copia e cola".
+  - O JavaScript (ativarPaginaPix, em main.js) consulta a cada 5 segundos a
+    situação do pedido no NOSSO servidor e recarrega a página quando muda.
+    Ele só atualiza a tela: quem confirma o pagamento é o webhook do
+    Mercado Pago. Sem JavaScript, o link "Já paguei, atualizar" faz o mesmo.
+{% endcomment %}
+
+{% block title %}Pagar com Pix — Pedido nº {{ order.pk }} — Elegância Cristã{% endblock %}
+
+{% block content %}
+<section class="secao secao--topo">
+  <div class="container texto-pagina">
+    <h1 class="secao__titulo">Pagar com Pix</h1>
+    <p>Pedido nº {{ order.pk }} · <span class="status status--{{ order.status }}">{{ order.get_status_display }}</span></p>
+
+    {% if order.is_awaiting_payment %}
+      <div class="pix"
+           data-pix
+           data-status-url="{% url 'pix_status' order.pk %}"
+           data-status-atual="{{ order.status }}"
+           data-expira-em="{{ payment.expires_at|date:'c' }}">
+        <p class="pix__valor">Valor: <strong>R$ {{ payment.amount }}</strong></p>
+        <p>Pague até <strong>{{ payment.expires_at|date:"H:i" }}</strong> de {{ payment.expires_at|date:"d/m" }}.
+          Depois disso, o Pix deixa de valer e as peças voltam para a loja.</p>
+
+        <ol class="pix__passos">
+          <li>Abra o app do seu banco e escolha pagar com <strong>Pix</strong>.</li>
+          <li>Aponte a câmera para o QR Code <strong>ou</strong> use o "copia e cola".</li>
+          <li>Confira o valor e confirme. Esta página avisa quando o pagamento chegar.</li>
+        </ol>
+
+        {# |safe: o SVG vem da biblioteca qrcode, não de texto digitado (ver make_qr_svg). #}
+        <figure class="pix__qr" role="img" aria-label="QR Code do Pix do pedido nº {{ order.pk }}">
+          {{ qr_svg|safe }}
+        </figure>
+
+        <label class="pix__rotulo" for="pix-copia-e-cola">Pix copia e cola</label>
+        <textarea id="pix-copia-e-cola" class="pix__codigo" rows="4" readonly>{{ payment.pix_code }}</textarea>
+        {# Começa escondido: só aparece se o JavaScript (e a área de transferência) funcionar. #}
+        <button type="button" class="botao" data-copiar="#pix-copia-e-cola" hidden>Copiar código</button>
+
+        {# aria-live: o leitor de tela anuncia as mensagens que aparecem aqui. #}
+        <p class="pix__aviso" data-pix-aviso aria-live="polite"></p>
+
+        <p><a href="{% url 'pix_page' order.pk %}">Já paguei, atualizar</a></p>
+      </div>
+    {% elif order.status == 'pago' %}
+      <p class="mensagem mensagem--success">Pagamento confirmado pelo Mercado Pago. Obrigada! Vamos preparar o envio.</p>
+    {% elif order.status == 'expirado' %}
+      <p class="mensagem mensagem--info">O prazo para pagar terminou e as peças voltaram para a loja. Se ainda quiser, é só fazer um novo pedido.</p>
+    {% else %}
+      <p class="mensagem mensagem--info">Este pedido não aguarda mais pagamento.</p>
+    {% endif %}
+
+    <p class="conta__alternativa"><a href="{% url 'order_detail' order.pk %}">← Voltar ao pedido</a></p>
+  </div>
+</section>
+{% endblock %}

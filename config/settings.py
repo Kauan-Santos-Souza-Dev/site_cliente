@@ -84,6 +84,8 @@ INSTALLED_APPS = [
     'loja',
     'carrinho',
     'pedidos',
+    # Pagamentos pelo Mercado Pago (v2 Etapa 7: Pix).
+    'pagamentos',
     # O admin do Django com 2FA obrigatório (contas/admin_config.py). Substitui
     # 'django.contrib.admin': é o mesmo admin, mas com outro "site" padrão.
     'contas.admin_config.LojaAdminConfig',
@@ -355,3 +357,37 @@ STORE_MOTTO = 'Operando Deus quem impedirá'
 STORE_LEGAL_NAME = os.environ.get('STORE_LEGAL_NAME', '').strip()
 STORE_CNPJ = os.environ.get('STORE_CNPJ', '').strip()
 STORE_ADDRESS = os.environ.get('STORE_ADDRESS', '').strip()
+
+
+# ---------------------------------------------------------------------------
+# Pagamento online: Mercado Pago (v2 Etapa 7, decisões 100 a 105)
+# ---------------------------------------------------------------------------
+# Chaves SÓ no .env (nunca no código, nunca no Git, nunca em log).
+# Comece SEMPRE com as credenciais de TESTE (sandbox). Sem Access Token, o
+# botão "Pagar com Pix" some e o site avisa que o pagamento está indisponível.
+MERCADOPAGO_ACCESS_TOKEN = os.environ.get('MERCADOPAGO_ACCESS_TOKEN', '').strip()
+# Assinatura secreta do webhook, gerada no painel do Mercado Pago (v2 Etapa 7b).
+MERCADOPAGO_WEBHOOK_SECRET = os.environ.get('MERCADOPAGO_WEBHOOK_SECRET', '').strip()
+# SÓ NO SANDBOX: com "APRO", o Mercado Pago aprova o Pix de teste sozinho.
+# Em produção fica VAZIO (aí o site não manda nome nenhum ao gateway).
+MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME = os.environ.get('MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME', '').strip()
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+# O logger "pagamentos" escreve no terminal (console). Regra do projeto:
+# logs SEM dados pessoais e SEM dados de pagamento. As mensagens levam só
+# números de pedido/pagamento e status do gateway; nunca e-mail, valor,
+# "copia e cola", token ou corpo de resposta do Mercado Pago.
+LOGGING = {
+    'version': 1,
+    # False: não desliga os logs que o Django já configura sozinho.
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        'pagamentos': {'handlers': ['console'], 'level': 'INFO'},
+    },
+}

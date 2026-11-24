@@ -675,13 +675,14 @@ class GroupsCommandTest(TestCase):
         apps = set(
             Group.objects.get(name='Loja').permissions.values_list('content_type__app_label', flat=True)
         )
-        self.assertEqual(apps, {'loja', 'pedidos'})
+        # pagamentos (v2 Etapa 7): só "view" (decisão 102).
+        self.assertEqual(apps, {'loja', 'pedidos', 'pagamentos'})
 
     def test_rodar_de_novo_nao_duplica(self):
         self.run_command()
         self.run_command()
         self.assertEqual(Group.objects.filter(name='Loja').count(), 1)
-        self.assertEqual(Group.objects.get(name='Loja').permissions.count(), 23)
+        self.assertEqual(Group.objects.get(name='Loja').permissions.count(), 24)  # 23 + ver pagamentos
 
     def test_conta_do_grupo_edita_produtos_mas_nao_ve_clientes(self):
         self.run_command()
