@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% comment %}
   Página do Pix (view pagamentos.views.pix_page, v2 Etapa 7, decisão 104).
-  - O QR Code é desenhado pelo servidor (SVG) a partir do "copia e cola".
+  - O QR Code retornado pelo Mercado Pago é salvo no pagamento e exibido aqui.
   - O JavaScript (ativarPaginaPix, em main.js) consulta a cada 5 segundos a
     situação do pedido no NOSSO servidor e recarrega a página quando muda.
     Ele só atualiza a tela: quem confirma o pagamento é o webhook do
@@ -32,9 +32,13 @@
           <li>Confira o valor e confirme. Esta página avisa quando o pagamento chegar.</li>
         </ol>
 
-        {# |safe: o SVG vem da biblioteca qrcode, não de texto digitado (ver make_qr_svg). #}
         <figure class="pix__qr" role="img" aria-label="QR Code do Pix do pedido nº {{ order.pk }}">
-          {{ qr_svg|safe }}
+          {% if qr_data_uri %}
+            <img src="{{ qr_data_uri }}" alt="QR Code do Pix do pedido nº {{ order.pk }}">
+          {% else %}
+            {# Compatibilidade com cobrança antiga sem imagem persistida. #}
+            {{ qr_svg|safe }}
+          {% endif %}
         </figure>
 
         <label class="pix__rotulo" for="pix-copia-e-cola">Pix copia e cola</label>

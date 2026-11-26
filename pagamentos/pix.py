@@ -1,10 +1,9 @@
 """Cobrança Pix de um pedido: cria no Mercado Pago e alinha os prazos (decisão 103).
 
 Quem manda no prazo?
-O NOSSO servidor (Order.expires_at). O Pix é criado para expirar ANTES do
-pedido: Pix em "agora + N minutos" e pedido em "agora + N + 2 minutos". A
-margem cobre atraso de rede e diferença de relógio: quando a nossa
-expiração devolve as peças ao estoque, o Pix já não aceita pagamento.
+O prazo da cobrança Pix e a reserva do pedido usam o mesmo instante de
+expiração. O horário local é contado a partir do início da requisição ao
+gateway, para nunca ultrapassar os N minutos de validade do Pix.
 
 Por que a reserva é renovada?
 O Pix é gerado DEPOIS do checkout (a cliente pode demorar a clicar em
@@ -29,10 +28,6 @@ logger = logging.getLogger('pagamentos')
 
 # O Mercado Pago não aceita Pix com prazo menor que 30 minutos.
 PIX_MINIMUM_MINUTES = 30
-# O pedido expira um pouco DEPOIS do Pix (ver o topo do arquivo).
-ORDER_EXPIRY_MARGIN = timedelta(minutes=2)
-
-
 class PixNotAllowed(Exception):
     """O pedido não aguarda mais pagamento (pago, expirado, cancelado...)."""
 
@@ -86,6 +81,7 @@ def start_pix_payment(order):
 
     # Passo 2
     minutes = pix_minutes()
+    requested_at = timezone.now()
     charge = gateway.create_pix_order(
         reference=payment.external_reference,
         amount=payment.amount,
@@ -107,13 +103,14 @@ def start_pix_payment(order):
         payment.gateway_status = charge.status
         payment.gateway_status_detail = charge.status_detail
         payment.pix_code = charge.pix_code
-        payment.expires_at = now + timedelta(minutes=minutes)
+        payment.expires_at = requested_at + timedelta(minutes=minutes)
+        payment.qr_code_base64 = charge.qr_code_base64
         payment.save()
         # Renova a reserva (uma vez só) se o pedido ainda aguarda. Se ele foi
         # cancelado nesse meio-tempo, não mexe: um pagamento que chegue mesmo
         # assim vira estorno (v2 Etapa 7b).
         if locked_order.status == Order.Status.AWAITING_PAYMENT:
-            locked_order.expires_at = payment.expires_at + ORDER_EXPIRY_MARGIN
+            locked_order.expires_at = payment.expires_at
             locked_order.save(update_fields=['expires_at', 'updated_at'])
 
     # Log só com números e status: nada de e-mail, valor ou "copia e cola".

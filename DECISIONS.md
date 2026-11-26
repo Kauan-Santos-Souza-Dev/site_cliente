@@ -312,7 +312,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Escolha:** a cobrança Pix expira em **30 minutos** (configurável). Quando expira, o pedido vira "expirado" e o estoque reservado volta.
 - **Por quê:** um pedido não pago prende peças que outra cliente poderia comprar. Trinta minutos dá tempo de abrir o app do banco sem segurar o estoque por muito tempo.
 - **Implementação:** v2 Etapa 5 (reserva e expiração) e Etapa 7 (data de expiração enviada ao Mercado Pago).
-- **Atualização (v2 Etapa 7):** o Pix expira em `reservation_minutes` (mínimo 30, o menor prazo aceito pelo Mercado Pago) e o pedido **2 minutos depois** (decisão 103).
+- **Atualização (v2 Etapa 7a):** o Pix expira em `reservation_minutes` (mínimo 30, o menor prazo aceito pelo Mercado Pago) e a reserva do pedido termina no mesmo instante. A expiração do pedido continua pelo mecanismo existente (`expirar_pedidos`).
 
 ## 59. CPF não é armazenado — v2 Etapa 1 (atualizada na v2 Etapa 7)
 - **Escolha:** o site **não guarda CPF**. No cartão, o Checkout Pro pede o CPF na página do Mercado Pago. No Pix, se o Mercado Pago exigir o CPF do pagador, ele é pedido no momento do pagamento e enviado direto ao gateway, sem ir para o banco de dados nem para os logs.
@@ -544,7 +544,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - (b) A devolução usa `F('stock') + qtd`.
   - (c) As variações são travadas e atualizadas **em ordem de id** no checkout e na devolução, para evitar *deadlock* (dois processos esperando um pelo outro).
 - **Pendência para a Etapa 7:** pagamento que chega depois de o pedido expirar. O Pix será criado no Mercado Pago com o mesmo `expires_at`, e o caso residual vira estorno.
-  - **v2 Etapa 7a:** o Pix expira 2 minutos **antes** do pedido (decisão 103). O estorno do caso residual fica na Etapa 7b.
+  - **v2 Etapa 7a:** a validade do Pix e a reserva terminam juntas; o timestamp local parte do início da chamada ao gateway para não passar da validade da cobrança. O estorno de confirmação tardia fica na Etapa 7b.
 - **Descartado:** Celery/fila de tarefas (infraestrutura demais para uma loja pequena); expirar só pela página (sem garantia de que alguém abra).
 
 ## 89. `StoreSettings`: configuração única da loja no admin — v2 Etapa 5 (atualizada na v2 Etapa 7)
@@ -690,32 +690,32 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Descartado:** `requests` direto (manter à mão o que o SDK já faz, inclusive o manifesto da assinatura); a 3.6.1 (nova demais).
 
 ## 102. Model `pagamentos.Payment`: só IDs, status, valor e prazos — v2 Etapa 7
-- **Escolha:** app novo, `pagamentos`, com o model `Payment` ligado ao pedido (`ForeignKey`, `PROTECT`). Campos: forma (`pix`), situação própria (criando, pendente, aprovado, cancelado, expirado, divergente, estorno pendente, estornado, estorno falhou), valor **congelado** na criação, chave de idempotência (UUID), IDs e status do Mercado Pago, "copia e cola", prazo do Pix e data da aprovação.
+- **Escolha:** app novo, `pagamentos`, com o model `Payment` ligado ao pedido (`ForeignKey`, `PROTECT`). Campos: forma (`pix`), situação própria (criando, pendente, aprovado, cancelado, expirado, divergente, estorno pendente, estornado, estorno falhou), valor **congelado** na criação, chave de idempotência (UUID), IDs e status do Mercado Pago, "copia e cola", QR Code Base64, prazo do Pix e data da aprovação.
 - **Um Pix por pedido:** `UniqueConstraint(order, method)`, **sem condição** (o MySQL não aceita as condicionais). Basta um, porque quando o Pix expira o pedido expira junto (decisão 103).
-- **O que NÃO fica:** CPF, nome, e-mail, dados bancários, a imagem `qr_code_base64` (o QR é desenhado por nós) e o corpo das respostas do gateway.
+- **O que NÃO fica:** CPF, nome, e-mail, dados bancários e o corpo inteiro das respostas do gateway. O QR Code Base64 necessário para exibição é guardado em campo próprio.
 - **"Copia e cola" guardado (`pix_code`):** não é dado da cliente; é o código da cobrança da loja e morre com o Pix. Guardar evita consultar o Mercado Pago a cada visita à página do QR.
 - **Chave de idempotência gravada antes da chamada:** se a 1ª tentativa cair no meio, a 2ª manda a mesma chave e o Mercado Pago devolve a mesma cobrança, sem duplicar.
 - **Admin:** só consulta (sem adicionar, editar ou apagar). O grupo "Loja" ganhou só `view_payment` (agora 24 permissões).
 - **Situação do `Payment` separada do status do pedido:** um pagamento pode estar "aprovado" com o pedido "expirado" (pagamento tardio, Etapa 7b).
 - **Descartado:** guardar a resposta inteira do gateway (traz dados pessoais); campos de pagamento direto no `Order` (a Etapa 8 traz o cartão, e um pedido pode ter tentativas de formas diferentes).
 
-## 103. Prazo do Pix x reserva: o servidor manda, Pix 2 minutos antes — v2 Etapa 7
-- **Quem manda:** o **nosso** `Order.expires_at`. O Pix é criado para expirar **antes** do pedido.
-- **Regra (`pagamentos/pix.py`):** ao gerar o Pix, ele vale **N minutos** (`StoreSettings.reservation_minutes`) e o pedido passa a expirar em **agora + N + 2 minutos** (`ORDER_EXPIRY_MARGIN`). Quando a nossa expiração devolve as peças, o Pix já não aceita pagamento.
-- **Reserva renovada uma vez:** o Pix é gerado depois do checkout (a cliente pode demorar a clicar). Sem renovar, ela poderia receber um Pix de 30 minutos para um pedido que vence em 5. Como só existe um Pix por pedido, a renovação acontece uma vez. **Consequência aceita:** no pior caso, a peça fica presa ~2N minutos.
+## 103. Prazo do Pix igual ao da reserva — v2 Etapa 7a
+- **Regra atual:** validade da cobrança e `Order.expires_at` coincidem. O horário local é contado do início da requisição ao Mercado Pago, para que a reserva nunca passe dos N minutos de validade configurados para a cobrança.
+- **Reserva renovada uma vez:** o Pix é gerado depois do checkout (a cliente pode demorar a clicar). Sem renovar, ela poderia receber um Pix de 30 minutos para um pedido que vence em 5. Como só existe um Pix por pedido, a reserva é renovada uma vez quando a cobrança é criada.
+- **Por que havia 2 minutos:** a decisão original adicionou `ORDER_EXPIRY_MARGIN` para cobrir latência e diferença de relógio, receando aceitar um Pix após devolver o estoque. O requisito confirmado é igualdade, sem validade do Pix maior que a reserva; a margem foi removida.
 - **Mínimo de 30 minutos:** o menor prazo que o Mercado Pago aceita. `reservation_minutes` passou de 5–1440 para **30–1440** (atualiza a decisão 89; a migration `loja/0006` sobe valores menores para 30). `pix_minutes()` ainda usa `max(N, 30)` por segurança.
 - **Três passos, sem segurar a trava durante a rede:** (1) com `select_for_update()` no pedido, confere "aguardando e dentro do prazo" e cria o `Payment` "criando"; (2) sem trava, chama o Mercado Pago; (3) com trava, grava IDs e prazos. Clique duplo: as duas requisições mandam a mesma chave de idempotência e só a primeira grava no passo 3.
-- **Na Etapa 7b:** pagamento que chega depois de expirar ou cancelar vira estorno automático com aviso à dona; cancelar o pedido cancela o Pix no gateway. A expiração **não** chama o gateway (seria rede dentro de páginas comuns): pela margem, o Pix já expirou sozinho.
-- **Descartado:** Pix com o mesmo prazo do pedido (sem margem, um pagamento no último segundo chegaria com as peças já devolvidas); criar o Pix no checkout (a Etapa 8 põe a escolha entre Pix e cartão no detalhe do pedido).
+- **Na Etapa 7b:** pagamento que chega depois de expirar ou cancelar vira estorno automático com aviso à dona; cancelar o pedido cancela o Pix no gateway. A expiração do pedido permanece local e não chama o gateway.
+- **Descartado:** criar o Pix no checkout (a Etapa 8 põe a escolha entre Pix e cartão no detalhe do pedido).
 
-## 104. Tela do Pix: QR desenhado por nós e consulta só ao nosso banco — v2 Etapa 7
+## 104. Tela do Pix: QR salvo do gateway e consulta só ao nosso banco — v2 Etapa 7a
 - **Onde:** no detalhe do pedido, enquanto "aguardando pagamento", o botão **"Pagar com Pix"** (POST + CSRF; a Etapa 8 põe o cartão ao lado). Ele leva a `/pagamentos/pedido/<id>/pix/`: QR Code, "copia e cola" com botão "Copiar", valor e prazo. Depois de gerado, o detalhe mostra "Ver o QR Code do Pix".
-- **QR Code:** desenhado em SVG pela biblioteca `qrcode` (instalada na Etapa 3) a partir do "copia e cola". O SVG entra na página com `|safe`: ele sai da biblioteca e só tem um `<path>` com coordenadas, então o conteúdo do Pix não tem como injetar HTML. É o **único** `|safe` do projeto.
+- **QR Code:** imagem Base64 (`qr_code_base64`) retornada e salva da Orders API. Cobranças antigas sem essa imagem podem usar SVG gerado localmente a partir do "copia e cola".
 - **Como a tela descobre que pagou:** o JavaScript consulta a cada 5 segundos `GET /pagamentos/pedido/<id>/pix/situacao/`, que devolve só `{"status": ...}` lido do **nosso banco**. Quando muda, a página recarrega. Essa rota **não fala com o Mercado Pago e não confirma nada**; quem muda o pedido para "pago" é o webhook (Etapa 7b). A única escrita possível nela é a expiração "preguiçosa" (decisão 88). Para de perguntar com a aba escondida e depois do prazo; `@never_cache` impede o navegador de reaproveitar uma resposta velha. Sem JavaScript: link "Já paguei, atualizar".
 - **Segurança:** todas as rotas com `@login_required` e busca por `request.user.orders` (IDOR: outra conta, pedido da v1 ou inexistente dão 404). Pedido que não aguarda pagamento ou já vencido não gera Pix.
 - **Sem Access Token no `.env`:** o botão some e aparece "pagamento online indisponível". O site funciona sem o Mercado Pago configurado.
 - **Erros genéricos na tela:** "Não foi possível gerar o Pix agora. Tente de novo em instantes."
-- **Descartado:** a imagem `qr_code_base64` do gateway (mais um dado guardado, imagem `data:` grande); o `ticket_url` (página externa); consultar o Mercado Pago a partir da tela (o navegador passaria a disparar chamadas ao gateway, e só o webhook confirma).
+- **Descartado:** o `ticket_url` (página externa); consultar o Mercado Pago a partir da tela (o navegador passaria a disparar chamadas ao gateway, e só o webhook confirma).
 
 ## 105. CPF no Pix: não enviado; confirmação no sandbox pendente — v2 Etapa 7
 - **Situação:** a documentação atual do Pix na Orders API manda só `payer.email` (e `first_name` no exemplo de teste). Nenhuma página consultada exige CPF. O código envia **só o e-mail** da conta (`gateway.build_pix_order_body`), e um teste garante que não há `identification` no corpo.

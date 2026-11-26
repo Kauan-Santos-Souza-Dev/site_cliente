@@ -74,6 +74,8 @@ def pix_page(request, pk):
     context = {
         'order': order,
         'payment': payment,
+        # O QR retornado pelo gateway é persistido; SVG atende cobranças antigas.
+        'qr_data_uri': f'data:image/png;base64,{payment.qr_code_base64}' if payment.qr_code_base64 else '',
         # O QR só aparece enquanto o pedido aguarda pagamento.
         'qr_svg': make_qr_svg(payment.pix_code) if order.is_awaiting_payment else '',
     }

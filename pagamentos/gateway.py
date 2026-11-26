@@ -27,7 +27,7 @@ logger = logging.getLogger('pagamentos')
 
 # Tempo máximo (segundos) esperando o Mercado Pago responder. Sem isso, uma
 # lentidão do gateway prenderia a página da cliente por muito tempo.
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 20.0
 
 
 class GatewayError(Exception):
@@ -49,6 +49,7 @@ class GatewayOrder:
     total_amount: Decimal | None
     payment_id: str
     pix_code: str
+    qr_code_base64: str
 
 
 def is_configured():
@@ -131,7 +132,7 @@ def _to_gateway_order(body):
 
     Onde ficam os dados do Pix (documentação da Orders API):
     transactions.payments[0].payment_method.qr_code = "copia e cola".
-    Não usamos o qr_code_base64 (imagem pronta): desenhamos o QR nós mesmos.
+    O Mercado Pago retorna o copia e cola e a imagem QR em Base64.
     """
     payments = (body.get('transactions') or {}).get('payments') or [{}]
     first_payment = payments[0] or {}
@@ -144,6 +145,7 @@ def _to_gateway_order(body):
         total_amount=parse_amount(body.get('total_amount')),
         payment_id=str(first_payment.get('id') or ''),
         pix_code=str(payment_method.get('qr_code') or ''),
+        qr_code_base64=str(payment_method.get('qr_code_base64') or ''),
     )
 
 

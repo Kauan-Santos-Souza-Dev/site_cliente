@@ -69,6 +69,8 @@ class Payment(models.Model):
     # loja, que morre quando o Pix expira. Guardado para redesenhar o QR Code
     # sem chamar o Mercado Pago a cada visita (decisão 102).
     pix_code = models.TextField('Pix copia e cola', blank=True)
+    # Imagem do QR dinâmico retornada pela Orders API (Base64 PNG).
+    qr_code_base64 = models.TextField('QR Code (Base64)', blank=True)
 
     expires_at = models.DateTimeField('Pix expira em', null=True, blank=True)
     approved_at = models.DateTimeField('aprovado em', null=True, blank=True)

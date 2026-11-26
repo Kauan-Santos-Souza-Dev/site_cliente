@@ -645,10 +645,10 @@ cobrança **imediata** do Mercado Pago (Orders API), **não** o "Pix Automático
 **Regras principais:**
 - Só o arquivo `pagamentos/gateway.py` fala com o Mercado Pago (SDK oficial `mercadopago` 3.6.0). Nos testes ele é simulado.
 - Um Pix por pedido. Clicar de novo reaproveita o mesmo; a chave de idempotência evita cobrança duplicada no gateway.
-- **Prazos (decisão 103):** o Pix vale `reservation_minutes` (mínimo 30) e o pedido passa a expirar **2 minutos depois**.
-  Exemplo, com 30 min: Pix gerado às 14:00 → Pix vence às 14:30, pedido às 14:32.
+- **Prazos:** o Pix vale `reservation_minutes` (mínimo 30) e a reserva do pedido vence no mesmo instante.
+  Exemplo, com 30 min: Pix gerado às 14:00 → Pix e reserva vencem às 14:30.
 - Vai ao Mercado Pago só o **e-mail** da conta e o **valor**. Sem CPF, nome ou endereço. No banco fica o `Payment`:
-  IDs do gateway, situação, valor, prazo e o "copia e cola".
+  IDs do gateway, situação, valor, prazo, "copia e cola" e imagem QR em Base64.
 - A página do QR pergunta ao **nosso** servidor, a cada 5 s, se o pedido mudou. O navegador só atualiza a tela; nunca confirma pagamento.
 
 **Caminho de "Pagar com Pix" (POST):**
@@ -661,10 +661,10 @@ POST /pagamentos/pedido/<id>/pix/gerar/ → config/urls.py → pagamentos/urls.p
           → Payment.objects.get_or_create(order, método pix)             status "criando", chave de idempotência
        2. gateway.create_pix_order(...)  (sem trava)                     POST /v1/orders no Mercado Pago (SDK)
           → build_pix_order_body: valor em texto, "PT30M", só o e-mail
-       3. transaction.atomic + select_for_update                         grava IDs, "copia e cola", prazo do Pix
-          → Order.expires_at = Pix + 2 min                               (Order.save aplica a tabela de transições)
+       3. transaction.atomic + select_for_update                         grava IDs, "copia e cola", QR e prazo do Pix
+          → Order.expires_at = Payment.expires_at                       (a reserva nunca passa a validade do Pix)
   → redirect /pagamentos/pedido/<id>/pix/ → views.pix_page
-       → make_qr_svg(pix_code) (biblioteca qrcode) → templates/pagamentos/pix.html
+       → templates/pagamentos/pix.html exibe o QR Base64 salvo e o "copia e cola"
        → static/js/main.js::ativarPaginaPix → GET .../pix/situacao/ a cada 5 s → views.pix_status (JSON do nosso banco)
 ```
 
@@ -711,7 +711,7 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
 | `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97). **v2 Etapa 6:** parcelas (limite, parcela mínima, soma exata dos centavos em 1x a 12x, `Decimal`, política "cliente paga"); menor limite do carrinho; produto com limite maior que o geral em compra pequena (a parcela mínima vence); páginas do produto e do checkout (estimativa, nunca "sem juros"); admin (edição em lista recusa 0 e 13, ação "voltar à regra geral", grupo "Loja") |
-| `pagamentos/tests.py` | **v2 Etapa 7a** (Mercado Pago simulado): corpo do Pix (valor em texto, `PT30M`, só e-mail, sem CPF, `APRO` só se configurado, `float` recusado); erro e falha de rede viram mensagem genérica e log sem token/e-mail; gerar Pix (prazos Pix + 2 min, reserva renovada, configuração da loja, reaproveita no 2º clique, mesma chave de idempotência após falha); 404 para outra conta, pedido da v1 e inexistente; não gera Pix para pedido cancelado, expirado ou vencido; só POST; login; sem token = indisponível; nunca marca "pago"; página do QR e situação em JSON (só lê o banco, `never_cache`, 404 para outra conta); reserva mínima de 30 min |
+| `pagamentos/tests.py` | **v2 Etapa 7a** (Mercado Pago simulado): corpo do Pix (valor em texto, `PT30M`, só e-mail, sem CPF, `APRO` só se configurado, `float` recusado); erro e falha de rede viram mensagem genérica e log sem token/e-mail; gerar Pix (prazo da cobrança igual ao da reserva, QR persistido, configuração da loja, reaproveita no 2º clique, mesma chave de idempotência após falha); 404 para outra conta, pedido da v1 e inexistente; não gera Pix para pedido cancelado, expirado ou vencido; só POST; login; sem token = indisponível; nunca marca "pago"; página do QR e situação em JSON (só lê o banco, `never_cache`, 404 para outra conta); reserva mínima de 30 min |
 | `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança

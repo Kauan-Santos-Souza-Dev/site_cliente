@@ -11,6 +11,7 @@ pronta. Nenhum teste faz chamada de rede (regra do CLAUDE.md).
 from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
@@ -24,7 +25,6 @@ from pedidos.models import Order
 from . import gateway
 from .gateway import GatewayError, GatewayOrder
 from .models import Payment
-from .pix import ORDER_EXPIRY_MARGIN
 
 S = Order.Status
 FAKE_TOKEN = 'TEST-token-falso-so-para-testes'
@@ -40,6 +40,7 @@ def fake_charge(**changes):
         'id': 'ORD01TESTE', 'status': 'action_required', 'status_detail': 'waiting_transfer',
         'external_reference': 'pagamento-1', 'total_amount': Decimal('169.90'),
         'payment_id': 'PAY01TESTE', 'pix_code': FAKE_PIX_CODE,
+        'qr_code_base64': 'aW1hZ2VtLWRlLXFy',
     }
     data.update(changes)
     return GatewayOrder(**data)
@@ -68,6 +69,12 @@ class GatewayBodyTest(TestCase):
             reference='pagamento-7', amount=Decimal('169.9'),
             payer_email='cliente@example.com', expiration_minutes=30,
         )
+
+    def test_request_options_real_do_sdk_aceita_timeout_float(self):
+        """Constrói o RequestOptions instalado, sem mockar a validação do SDK."""
+        options = gateway._request_options(uuid.uuid4())
+        self.assertEqual(options.connection_timeout, 20.0)
+        self.assertIsInstance(options.connection_timeout, float)
 
     @override_settings(MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME='')
     def test_corpo_do_pix(self):
@@ -103,10 +110,13 @@ class GatewayBodyTest(TestCase):
         body = {
             'id': 'ORD1', 'status': 'action_required', 'status_detail': 'waiting_transfer',
             'external_reference': 'pagamento-7', 'total_amount': '169.90',
-            'transactions': {'payments': [{'id': 'PAY1', 'payment_method': {'qr_code': 'abc'}}]},
+            'transactions': {'payments': [{'id': 'PAY1', 'payment_method': {
+                'qr_code': 'abc', 'qr_code_base64': 'aW1hZ2Vt',
+            }}]},
         }
         charge = gateway._to_gateway_order(body)
         self.assertEqual((charge.id, charge.payment_id, charge.pix_code), ('ORD1', 'PAY1', 'abc'))
+        self.assertEqual(charge.qr_code_base64, 'aW1hZ2Vt')
         self.assertEqual(charge.total_amount, Decimal('169.90'))
 
     @override_settings(MERCADOPAGO_ACCESS_TOKEN=FAKE_TOKEN)
@@ -162,6 +172,7 @@ class StartPixTest(TestCase):
         self.assertEqual(payment.status, Payment.Status.PENDING)
         self.assertEqual(payment.gateway_order_id, 'ORD01TESTE')
         self.assertEqual(payment.pix_code, FAKE_PIX_CODE)
+        self.assertEqual(payment.qr_code_base64, 'aW1hZ2VtLWRlLXFy')
         # O que foi mandado ao "Mercado Pago": total do pedido (itens + frete) em Decimal.
         kwargs = create.call_args.kwargs
         self.assertEqual(kwargs['amount'], Decimal('169.90'))
@@ -170,8 +181,8 @@ class StartPixTest(TestCase):
         self.assertEqual(kwargs['payer_email'], self.customer.email)
         self.assertEqual(kwargs['idempotency_key'], payment.idempotency_key)
 
-    def test_prazos_pix_antes_do_pedido(self):
-        """Decisão 103: Pix em agora + 30 min; pedido em Pix + 2 min."""
+    def test_prazos_pix_e_reserva_terminam_juntos(self):
+        """Pix e reserva vencem juntos, dentro dos 30 minutos."""
         with mock.patch(CREATE_PIX, return_value=fake_charge()) as create:
             self.start()
         payment = Payment.objects.get()
@@ -180,16 +191,43 @@ class StartPixTest(TestCase):
         self.assertAlmostEqual(
             payment.expires_at, timezone.now() + timedelta(minutes=30), delta=timedelta(seconds=10)
         )
-        self.assertEqual(self.order.expires_at, payment.expires_at + ORDER_EXPIRY_MARGIN)
+        self.assertEqual(self.order.expires_at, payment.expires_at)
 
     def test_reserva_renovada_quando_estava_quase_vencendo(self):
-        """Faltavam 3 minutos: ao gerar o Pix, a reserva volta a ter 30 (+2)."""
+        """Faltavam 3 minutos: ao gerar o Pix, reserva e cobrança têm 30 minutos."""
         self.order.expires_at = timezone.now() + timedelta(minutes=3)
         self.order.save()
         with mock.patch(CREATE_PIX, return_value=fake_charge()):
             self.start()
         self.order.refresh_from_db()
-        self.assertGreater(self.order.expires_at, timezone.now() + timedelta(minutes=31))
+        self.assertGreater(self.order.expires_at, timezone.now() + timedelta(minutes=29))
+        self.assertLess(self.order.expires_at, timezone.now() + timedelta(minutes=31))
+
+    def test_pix_gerado_tres_minutos_apos_pedido_renova_reserva_por_30_minutos(self):
+        """A reserva inicial vence 30 min após o pedido; gerar Pix renova os 30 min."""
+        self.order.expires_at -= timedelta(minutes=3)
+        self.order.save()
+        prazo_original = self.order.expires_at
+        inicio_geracao_pix = timezone.now()
+        self.assertAlmostEqual(
+            prazo_original,
+            inicio_geracao_pix + timedelta(minutes=27),
+            delta=timedelta(seconds=2),
+        )
+
+        with mock.patch(CREATE_PIX, return_value=fake_charge()) as create:
+            self.start()
+
+        payment = Payment.objects.get(order=self.order)
+        self.order.refresh_from_db()
+        self.assertEqual(create.call_args.kwargs['expiration_minutes'], 30)
+        self.assertAlmostEqual(
+            payment.expires_at,
+            inicio_geracao_pix + timedelta(minutes=30),
+            delta=timedelta(seconds=10),
+        )
+        self.assertEqual(self.order.expires_at, payment.expires_at)
+        self.assertGreater(self.order.expires_at, prazo_original)
 
     def test_prazo_do_pix_segue_a_configuracao_da_loja(self):
         config = StoreSettings.load()
@@ -336,12 +374,13 @@ class PixPageTest(TestCase):
             order=self.order, method=Payment.Method.PIX, status=Payment.Status.PENDING,
             amount=self.order.total, pix_code=FAKE_PIX_CODE, gateway_order_id='ORD01TESTE',
             expires_at=timezone.now() + timedelta(minutes=30),
+            qr_code_base64='aW1hZ2VtLWRlLXFy',
         )
 
     def test_mostra_qr_e_copia_e_cola(self):
         response = self.client.get(reverse('pix_page', args=[self.order.pk]))
         self.assertContains(response, 'class="pix__qr"')
-        self.assertContains(response, 'xmlns="http://www.w3.org/2000/svg"')  # o SVG do QR Code
+        self.assertContains(response, 'data:image/png;base64,aW1hZ2VtLWRlLXFy')
         self.assertContains(response, FAKE_PIX_CODE)
         self.assertContains(response, 'R$ 169,90')  # formato brasileiro (LANGUAGE_CODE pt-br)
         self.assertContains(response, reverse('pix_status', args=[self.order.pk]))
