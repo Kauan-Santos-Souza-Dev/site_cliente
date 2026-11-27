@@ -22,6 +22,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 | v2 · 5b | Status "entregue", cancelamento pela cliente, devolução manual de estoque | 95 a 97 (e atualiza 87 e 92) |
 | v2 · 6 | Parcelamento configurável: regra geral, limite por produto, cálculo, juros e gateway | 98 e 99 (e atualiza 56 e 57) |
 | v2 · 7a | Pix: Orders API, SDK, model `Payment`, prazos, tela do QR, CPF | 100 a 105 (e atualiza 53, 58, 59, 88 e 89) |
+| v2 · 7b | Webhook do Pix: assinatura, reconsulta, idempotência, pagamento tardio, cancelamento no gateway | 106 a 109 (e atualiza 88, 96 e 103) |
 
 ## 1. Django 6.1 com Python 3.14 — Etapa 1
 - **Escolha:** Django 6.1 (a versão instalada pelo `pip`), em Python 3.14.
@@ -532,7 +533,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **"Pago" nunca à mão:** no admin, o status é só leitura e muda por duas ações: "Marcar como enviado" (só de pago) e "Cancelar" (só de aguardando). Não existe ação "marcar como pago": quem confirma pagamento é o gateway (regra inegociável do CLAUDE.md).
 - **Descartado:** biblioteca de máquina de estados (`django-fsm`), mais uma dependência para um dicionário de 6 linhas.
 
-## 88. Reserva de estoque com prazo: comando + expiração "preguiçosa" — v2 Etapa 5
+## 88. Reserva de estoque com prazo: comando + expiração "preguiçosa" — v2 Etapa 5 (atualizada na v2 Etapa 7b)
 - **Reserva:** a baixa do estoque no checkout (decisão 42) já é a reserva. `Order.expires_at = agora + StoreSettings.reservation_minutes` (30 min, decisão 58). Pedidos sem prazo (os da v1) nunca expiram sozinhos.
 - **Expiração (`pedidos/reservations.py`):** `expire_order` abre uma transação, busca o pedido **com trava** e confere de novo "aguardando **e** vencido" antes de marcar "expirado". O `save()` devolve o estoque.
 - **Quem chama:**
@@ -545,6 +546,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
   - (c) As variações são travadas e atualizadas **em ordem de id** no checkout e na devolução, para evitar *deadlock* (dois processos esperando um pelo outro).
 - **Pendência para a Etapa 7:** pagamento que chega depois de o pedido expirar. O Pix será criado no Mercado Pago com o mesmo `expires_at`, e o caso residual vira estorno.
   - **v2 Etapa 7a:** a validade do Pix e a reserva terminam juntas; o timestamp local parte do início da chamada ao gateway para não passar da validade da cobrança. O estorno de confirmação tardia fica na Etapa 7b.
+  - **Atualizada pela decisão 108 (v2 Etapa 7b):** o pagamento tardio **não** vira estorno automático. O pedido continua expirado, o `Payment` fica "Pago após expirar (decidir)" e a dona decide se entrega ou estorna.
 - **Descartado:** Celery/fila de tarefas (infraestrutura demais para uma loja pequena); expirar só pela página (sem garantia de que alguém abra).
 
 ## 89. `StoreSettings`: configuração única da loja no admin — v2 Etapa 5 (atualizada na v2 Etapa 7)
@@ -618,7 +620,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Política de Privacidade:** a frase da exclusão passou a falar em "entrega", e `PRIVACY_POLICY_VERSION` subiu para `2026-11-22.3`.
 - **PENDÊNCIA DE PRODUÇÃO (antes de ter clientes reais): não existe reaceite.** O aceite grava a versão da Política **só no cadastro** (`contas/views.py`, model `Consent`). Subir a versão **não** afeta as contas existentes: elas continuam com a versão antiga gravada, não veem aviso e não são chamadas a aceitar a nova. Hoje isso é inofensivo (não há clientes reais, e a mudança só detalha uma regra). Mas, quando houver clientes, uma mudança **material** na Política exigirá avisar e/ou pedir novo aceite (LGPD art. 8º, §6º). Não implementado agora, de propósito.
 
-## 96. A cliente cancela sozinha o pedido aguardando pagamento — v2 Etapa 5b
+## 96. A cliente cancela sozinha o pedido aguardando pagamento — v2 Etapa 5b (atualizada na v2 Etapa 7b)
 - **Escolha:** `POST /pedido/meus-pedidos/<id>/cancelar/` (`pedidos/views.py::cancel_order`), com botão em "Meus pedidos" e no detalhe, e confirmação por `data-confirmar` (JavaScript, melhora progressiva).
 - **Segurança:**
   - Só POST (`@require_POST`; GET dá 405) e CSRF do Django: um link ou robô não cancela nada.
@@ -627,6 +629,7 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Concorrência:** `reservations.py::cancel_order_by_customer` tem o mesmo molde de `expire_order`: `transaction.atomic()` + `select_for_update()` na linha do pedido, relendo o status dentro da trava. Cancelar, expirar e (Etapa 7) pagar ao mesmo tempo: o segundo a chegar não acha um pedido "aguardando" e não faz nada. O estoque volta uma só vez, pelo `Order.save()`.
 - **Antes de cancelar**, a view expira os pedidos vencidos da conta, para a mensagem ficar certa.
 - **Pendência para a Etapa 7:** se já existir um Pix gerado, o cancelamento deve também cancelar a cobrança no Mercado Pago, e um pagamento que chegue depois para pedido cancelado vira estorno.
+  - **Atualizada pela decisão 108 (v2 Etapa 7b):** o cancelamento no Mercado Pago foi feito (decisão 109). O pagamento que chega depois **não** vira estorno automático: fica "Pago após expirar (decidir)" para a dona.
 - **Aprovado como padrão** pelo Kauan; a dona pode mudar.
 - **Descartado:** cancelar por GET (inseguro); botão sem confirmação (clique acidental sem volta: a cliente teria de refazer o pedido).
 
@@ -699,13 +702,14 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Situação do `Payment` separada do status do pedido:** um pagamento pode estar "aprovado" com o pedido "expirado" (pagamento tardio, Etapa 7b).
 - **Descartado:** guardar a resposta inteira do gateway (traz dados pessoais); campos de pagamento direto no `Order` (a Etapa 8 traz o cartão, e um pedido pode ter tentativas de formas diferentes).
 
-## 103. Prazo do Pix igual ao da reserva — v2 Etapa 7a
+## 103. Prazo do Pix igual ao da reserva — v2 Etapa 7a (atualizada na v2 Etapa 7b)
 - **Regra atual:** validade da cobrança e `Order.expires_at` coincidem. O horário local é contado do início da requisição ao Mercado Pago, para que a reserva nunca passe dos N minutos de validade configurados para a cobrança.
 - **Reserva renovada uma vez:** o Pix é gerado depois do checkout (a cliente pode demorar a clicar). Sem renovar, ela poderia receber um Pix de 30 minutos para um pedido que vence em 5. Como só existe um Pix por pedido, a reserva é renovada uma vez quando a cobrança é criada.
 - **Por que havia 2 minutos:** a decisão original adicionou `ORDER_EXPIRY_MARGIN` para cobrir latência e diferença de relógio, receando aceitar um Pix após devolver o estoque. O requisito confirmado é igualdade, sem validade do Pix maior que a reserva; a margem foi removida.
 - **Mínimo de 30 minutos:** o menor prazo que o Mercado Pago aceita. `reservation_minutes` passou de 5–1440 para **30–1440** (atualiza a decisão 89; a migration `loja/0006` sobe valores menores para 30). `pix_minutes()` ainda usa `max(N, 30)` por segurança.
 - **Três passos, sem segurar a trava durante a rede:** (1) com `select_for_update()` no pedido, confere "aguardando e dentro do prazo" e cria o `Payment` "criando"; (2) sem trava, chama o Mercado Pago; (3) com trava, grava IDs e prazos. Clique duplo: as duas requisições mandam a mesma chave de idempotência e só a primeira grava no passo 3.
 - **Na Etapa 7b:** pagamento que chega depois de expirar ou cancelar vira estorno automático com aviso à dona; cancelar o pedido cancela o Pix no gateway. A expiração do pedido permanece local e não chama o gateway.
+  - **Atualizada pela decisão 108 (v2 Etapa 7b):** sem estorno automático. O `Payment` fica "Pago após expirar (decidir)", o admin avisa a dona e ela decide. O cancelamento do Pix no gateway está na decisão 109.
 - **Descartado:** criar o Pix no checkout (a Etapa 8 põe a escolha entre Pix e cartão no detalhe do pedido).
 
 ## 104. Tela do Pix: QR salvo do gateway e consulta só ao nosso banco — v2 Etapa 7a
@@ -722,3 +726,45 @@ O título de cada decisão indica a etapa do roteiro (CLAUDE.md) em que ela foi 
 - **Sandbox:** `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME=APRO` faz o Mercado Pago aprovar o Pix de teste sozinho. Em produção a variável fica **vazia** e nenhum nome é enviado.
 - **Pendente:** gerar um Pix no sandbox com as credenciais do Kauan e confirmar que o Mercado Pago não recusa por falta de CPF. Se exigir, o CPF será pedido na tela do Pix e enviado **direto** ao gateway, sem ir ao banco nem aos logs (decisão 59), com nova aprovação do Kauan.
 - **Política de Privacidade:** passou a dizer o que vai ao Mercado Pago no Pix (e-mail e valor) e o que fica no `Payment`. Versão `2026-11-24` (a pendência de reaceite da decisão 95 continua valendo).
+
+## 106. Webhook: rota própria e assinatura conferida pelo validador do SDK — v2 Etapa 7b
+- **Rota:** `POST /pagamentos/webhook/mercadopago/` (`pagamentos/views.py::mercadopago_webhook`). É a URL cadastrada no painel do Mercado Pago (Webhooks, evento **"Order"**). Só POST (`@require_POST`), sem login.
+- **Por que `@csrf_exempt`:** é a **única** rota POST do site sem CSRF. Quem chama é o servidor do Mercado Pago, que não tem o token CSRF de uma página nossa. No lugar do CSRF entram a **assinatura** e a **reconsulta** (decisão 107).
+- **Como a assinatura é conferida:** o Mercado Pago calcula um HMAC-SHA256 de `id:<data.id>;request-id:<x-request-id>;ts:<ts>;` com a **assinatura secreta** (`MERCADOPAGO_WEBHOOK_SECRET`) e manda o resultado no cabeçalho `x-signature` (`ts=...,v1=...`). O site refaz a conta com o validador **oficial do SDK** (`mercadopago.webhook.WebhookSignatureValidator`, em `gateway.py::_signature_matches`), que compara em tempo constante. Assinatura ausente, malformada, de outro `data.id` ou com `x-request-id` trocado: **401** e nada é processado.
+- **Fallback em minúsculas:** se não bater com o `data.id` como chegou e o ID tiver maiúsculas, tenta de novo com ele em minúsculas (`gateway.py::is_webhook_signature_valid`). Uma versão da documentação manda usar o ID em minúsculas, e os IDs da Orders API são maiúsculos (`ORD01...`). As duas tentativas exigem a chave secreta, então a segurança não muda. **Confirmar no sandbox** qual das duas o Mercado Pago usa; depois, se quiser, remover a outra.
+- **Sem tolerância de tempo:** o validador aceita `tolerance_seconds` (recusar aviso com `ts` antigo), mas não usamos. Um aviso verdadeiro reenviado por alguém (*replay*) não faz mal: ele só dispara a reconsulta, e o processamento é idempotente (decisão 107). E não sabemos se os reenvios do Mercado Pago (a cada 15 minutos, por horas) trazem um `ts` novo; uma tolerância curta poderia recusar justamente o reenvio que confirma um pagamento.
+- **Chave vazia no `.env`:** 503 (problema nosso; o Mercado Pago tenta de novo). Teste e produção têm chaves **diferentes**.
+- **Log:** só o motivo da recusa (ex.: `SignatureMismatch`). Nunca a chave, os cabeçalhos ou a assinatura.
+- **Descartado:** escrever o HMAC à mão (a documentação não traz o texto exato do manifesto; o SDK traz e é mantido pelo Mercado Pago); proteger por IP de origem (o Mercado Pago não publica uma lista fixa, e o IP real atrás de proxy é frágil); segredo na URL (vazaria em logs de servidor).
+
+## 107. Webhook: reconsulta à API, conferência de valor e vínculo, idempotência e códigos de resposta — v2 Etapa 7b
+- **O aviso é só uma "campainha":** o corpo **não é lido**. Do aviso vem só o `data.id` (query string). O estado real vem de `GET /v1/orders/{id}` com o **nosso** Access Token (`gateway.get_order`, tempo máximo de 10 s, porque o Mercado Pago espera a resposta por até 22 s). Um aviso forjado, mesmo com assinatura válida, não consegue dizer "pago".
+- **Ordem desconhecida** (nenhum `Payment` com esse `gateway_order_id`): 200 e nada acontece, **sem** reconsultar.
+- **"Pago" exige os dois:** `status = processed` **e** `status_detail = accredited`. `processed` sozinho também aparece em reembolso parcial.
+- **Conferência (tudo em `Decimal`)** em `webhook.py::_matches_our_payment`: o ID da order é o que gravamos; a `external_reference` é a que **nós** mandamos (`pagamento-<id>`); `total_amount` **e** `total_paid_amount` iguais ao valor congelado no `Payment`; e o total atual do pedido (itens + frete) igual a esse mesmo valor. `total_paid_amount` vazio também é divergência. Qualquer diferença: `Payment` vira **"Valor divergente (conferir)"**, o pedido **não** vira pago e o log avisa (só números de pedido e pagamento).
+- **Cobrança não paga nunca vira "divergente":** não há dinheiro a conferir. Se o Mercado Pago diz `canceled` ou `failed`, o `Payment` pendente vira cancelado/expirado.
+- **Idempotência:** o mesmo aviso pode chegar várias vezes (e dois ao mesmo tempo). `apply_gateway_order` roda em `transaction.atomic()` com `select_for_update()` no **pedido e depois no pagamento** (mesma ordem de `pix.py`, contra *deadlock*). Situações finais (aprovado, pago após expirar, divergente) encerram o assunto: o aviso seguinte sai como "repetido", sem mudar `approved_at` nem o estoque. Teste com duas *threads* (`TransactionTestCase`) confirma que só uma confirma.
+- **Sem trava durante a rede:** a reconsulta acontece **antes** da transação, como em `pix.py`.
+- **Códigos de resposta:** **401** assinatura inválida/ausente; **200** aceito (inclusive order desconhecida, tipo de aviso que não é `order`/`orders` e aviso repetido: responder erro faria o Mercado Pago reenviar à toa); **503** problema nosso (chave ou token ausentes, Mercado Pago fora do ar na reconsulta), para o Mercado Pago tentar de novo; **500** erro inesperado (o Django responde), que também gera reenvio. A resposta é sempre vazia.
+- **Pago dentro do prazo, mas o `expirar_pedidos` ainda não rodou:** vira "pago" normalmente. O Mercado Pago só aceita o Pix dentro da validade, igual à da reserva (decisão 103), e as peças ainda estão presas para o pedido.
+- **Descartado:** confiar no corpo do aviso (qualquer um poderia montar um); responder 4xx para order desconhecida (reenvios inúteis por horas); comparar valores como `float` (regra do CLAUDE.md).
+
+## 108. Pagamento que chega depois de o pedido expirar ou ser cancelado: opção B (a dona decide) — v2 Etapa 7b
+- **Escolha (opção B):** o pedido **não** volta a "aguardando" nem vira "pago". O `Payment` fica **"Pago após expirar (decidir)"** (`LATE_PAID`, migration `pagamentos/0003`) e a dona decide, falando com a cliente, se **entrega** (se a peça ainda existir) ou **estorna**. **Atualiza as decisões 88, 96 e 103**, que previam estorno automático.
+- **Por quê:** quando o pedido expira ou é cancelado, as peças voltam ao estoque e podem ter sido vendidas para outra pessoa. Reativar o pedido poderia vender a mesma peça duas vezes; estornar sozinho poderia devolver o dinheiro de quem ainda quer (e pode receber) a peça. É um caso raro, que pede uma decisão humana.
+- **Como a dona fica sabendo (v2 Etapa 7b, parte 2):**
+  - **Admin → Pagamentos:** aviso amarelo no topo da lista enquanto houver cobrança "Pago após expirar" ou "Valor divergente", com a contagem de cada uma (`pagamentos/admin.py::PaymentAdmin.changelist_view`, mesmo padrão do frete provisório). Some sozinho quando não houver mais nenhuma.
+  - **Log** do servidor (só números de pedido e pagamento).
+- **O que a cliente vê:** na página do Pix, com o pedido expirado ou cancelado e o pagamento tardio, "Recebemos seu pagamento depois do prazo. A loja vai entrar em contato." (`pagamentos/views.py::is_late_paid`, `templates/pagamentos/pix.html`). Sem QR Code.
+- **Limitação atual:** o admin de pagamentos é só leitura, então ainda **não há como marcar o caso como resolvido**: o aviso continua até a Etapa 8 trazer o estorno pelo admin (o `Payment` passa a "estornado"). Se a dona decidir **entregar**, hoje não existe ação para isso; é pergunta para a Etapa 8.
+- **PENDÊNCIA (junto com a configuração do Brevo):** avisar a dona por **e-mail ou WhatsApp** quando houver "Pago após expirar" ou "Valor divergente". Hoje o e-mail só sai no console (decisão 62); sem o Brevo configurado, um aviso por e-mail não chegaria a ninguém. Até lá, ela precisa abrir o admin.
+- **Descartado:** estorno automático (o que as decisões 88, 96 e 103 previam: tira da dona a chance de entregar e exige o estorno da Etapa 8 dentro do webhook); reativar o pedido (pode vender a mesma peça duas vezes, porque o estoque já foi devolvido).
+
+## 109. Cancelar o pedido também cancela o Pix no Mercado Pago — v2 Etapa 7b
+- **Escolha:** quando a cliente cancela um pedido que já tem Pix pendente, `pedidos/views.py::cancel_order` chama `pagamentos/pix.py::cancel_pix_charge`, que faz `POST /v1/orders/{id}/cancel` (`gateway.cancel_order`). Assim o QR Code para de aceitar pagamento.
+- **Melhor esforço, depois do cancelamento local:** o pedido é cancelado (e o estoque devolvido) **primeiro**, com trava. Só depois, **fora** da transação, chamamos o Mercado Pago. Se ele falhar, o pedido continua cancelado e fica só um aviso no log; se a cliente pagar mesmo assim, o webhook marca "Pago após expirar" (decisão 108).
+- **Corrida com o webhook:** depois da chamada, com trava (pedido e depois pagamento), o `Payment` só vira "cancelado" se ainda estiver "pendente". Se um aviso de pagamento chegou no meio-tempo, ele vence.
+- **Chave de idempotência nova (`uuid4`):** a do `Payment` já foi usada para **criar** a order; reusá-la daria erro 409. Cancelar duas vezes não faz mal.
+- **Quando NÃO chama o gateway:** sem Pix gerado, pedido que não podia ser cancelado, ou sem Access Token no `.env` (cancela só o pedido).
+- **A expiração do pedido continua local** (decisão 88): não chama o Mercado Pago, porque o Pix vence sozinho no mesmo instante (decisão 103).
+- **Descartado:** cancelar no gateway **antes** do pedido (uma falha de rede impediria a cliente de cancelar); chamar o gateway dentro da transação (seguraria a trava esperando a rede).

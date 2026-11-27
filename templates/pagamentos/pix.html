@@ -53,6 +53,9 @@
       </div>
     {% elif order.status == 'pago' %}
       <p class="mensagem mensagem--success">Pagamento confirmado pelo Mercado Pago. Obrigada! Vamos preparar o envio.</p>
+    {% elif late_paid %}
+      {# Pagamento tardio (decisão 108; regra em views.pix_page): o pedido NÃO volta; a dona decide se entrega ou estorna. #}
+      <p class="mensagem mensagem--info">Recebemos seu pagamento depois do prazo. A loja vai entrar em contato.</p>
     {% elif order.status == 'expirado' %}
       <p class="mensagem mensagem--info">O prazo para pagar terminou e as peças voltaram para a loja. Se ainda quiser, é só fazer um novo pedido.</p>
     {% else %}

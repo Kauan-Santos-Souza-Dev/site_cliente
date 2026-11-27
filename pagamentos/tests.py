@@ -405,6 +405,39 @@ class PixPageTest(TestCase):
         self.assertNotContains(response, 'class="pix__qr"')
         self.assertNotContains(response, FAKE_PIX_CODE)
 
+    # --- Pagamento tardio (v2 Etapa 7b, decisão 108) ---------------------------
+    # .update() muda o banco direto, sem passar pelo Order.save() (que
+    # devolveria o estoque): aqui só importa o que a PÁGINA mostra.
+
+    LATE_TEXT = 'Recebemos seu pagamento depois do prazo. A loja vai entrar em contato.'
+
+    def test_pago_apos_expirar_mostra_aviso_no_pedido_expirado_e_cancelado(self):
+        Payment.objects.filter(pk=self.payment.pk).update(status=Payment.Status.LATE_PAID)
+        for status in (S.EXPIRED, S.CANCELLED):
+            with self.subTest(status=status):
+                Order.objects.filter(pk=self.order.pk).update(status=status)
+                response = self.client.get(reverse('pix_page', args=[self.order.pk]))
+                self.assertContains(response, self.LATE_TEXT)
+                # Sem QR: o Pix não vale mais e o pedido não volta.
+                self.assertNotContains(response, 'class="pix__qr"')
+                # A mensagem de "peças voltaram para a loja" não aparece junto.
+                self.assertNotContains(response, 'O prazo para pagar terminou')
+
+    def test_expirado_sem_pagamento_tardio_nao_mostra_o_aviso(self):
+        Order.objects.filter(pk=self.order.pk).update(status=S.EXPIRED)
+        Payment.objects.filter(pk=self.payment.pk).update(status=Payment.Status.EXPIRED)
+        response = self.client.get(reverse('pix_page', args=[self.order.pk]))
+        self.assertNotContains(response, self.LATE_TEXT)
+        self.assertContains(response, 'O prazo para pagar terminou')
+
+    def test_aviso_tardio_so_para_a_dona_do_pedido(self):
+        """IDOR: outra conta continua recebendo 404, mesmo com pagamento tardio."""
+        Order.objects.filter(pk=self.order.pk).update(status=S.EXPIRED)
+        Payment.objects.filter(pk=self.payment.pk).update(status=Payment.Status.LATE_PAID)
+        self.client.force_login(make_customer(email='outra@example.com'))
+        response = self.client.get(reverse('pix_page', args=[self.order.pk]))
+        self.assertEqual(response.status_code, 404)
+
     def test_situacao_em_json(self):
         response = self.client.get(reverse('pix_status', args=[self.order.pk]))
         self.assertEqual(response.json(), {'status': S.AWAITING_PAYMENT})
@@ -448,3 +481,72 @@ class ReservationMinimumTest(TestCase):
         config = StoreSettings.load()
         config.reservation_minutes = 30
         config.full_clean()  # não lança erro
+
+
+# ---------------------------------------------------------------------------
+# Admin: aviso de cobranças que pedem decisão da dona (v2 Etapa 7b)
+# ---------------------------------------------------------------------------
+
+class PaymentAdminWarningTest(TestCase):
+    """O topo da lista de pagamentos avisa "Pago após expirar" e "Valor divergente".
+
+    Mesmo padrão do aviso de frete provisório (pedidos/admin.py).
+    """
+
+    LATE_TEXT = 'pagamento(s) &quot;Pago após expirar&quot;'
+    DIVERGENT_TEXT = 'pagamento(s) com &quot;Valor divergente&quot;'
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from contas.test_utils import login_admin
+
+        admin_user = get_user_model().objects.create_superuser(
+            email='dona@example.com', password='senha-teste-123',
+        )
+        # Entra sem digitar senha nem código 2FA (só em testes; ver contas/test_utils.py).
+        login_admin(self.client, admin_user)
+        self.customer = make_customer()
+        self.url = reverse('admin:pagamentos_payment_changelist')
+
+    def make_payment(self, status):
+        """Um Pix (um por pedido, pela constraint) com a situação pedida."""
+        order = make_pending_order(self.customer)
+        return Payment.objects.create(
+            order=order, method=Payment.Method.PIX, status=status, amount=order.total,
+        )
+
+    def test_sem_casos_pendentes_nao_ha_aviso(self):
+        self.make_payment(Payment.Status.APPROVED)
+        self.make_payment(Payment.Status.PENDING)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, self.LATE_TEXT)
+        self.assertNotContains(response, self.DIVERGENT_TEXT)
+
+    def test_avisa_pago_apos_expirar_com_a_contagem(self):
+        self.make_payment(Payment.Status.LATE_PAID)
+        self.make_payment(Payment.Status.LATE_PAID)
+        response = self.client.get(self.url)
+        self.assertContains(response, '2 ' + self.LATE_TEXT)
+        self.assertNotContains(response, self.DIVERGENT_TEXT)
+
+    def test_avisa_valor_divergente(self):
+        self.make_payment(Payment.Status.DIVERGENT)
+        response = self.client.get(self.url)
+        self.assertContains(response, '1 ' + self.DIVERGENT_TEXT)
+        self.assertNotContains(response, self.LATE_TEXT)
+
+    def test_os_dois_avisos_juntos(self):
+        self.make_payment(Payment.Status.LATE_PAID)
+        self.make_payment(Payment.Status.DIVERGENT)
+        response = self.client.get(self.url)
+        self.assertContains(response, '1 ' + self.LATE_TEXT)
+        self.assertContains(response, '1 ' + self.DIVERGENT_TEXT)
+
+    def test_aviso_e_do_tipo_atencao(self):
+        """WARNING (amarelo), como o do frete: chama a atenção sem parecer erro do site."""
+        self.make_payment(Payment.Status.LATE_PAID)
+        response = self.client.get(self.url)
+        levels = [message.level_tag for message in response.context['messages']]
+        self.assertEqual(levels, ['warning'])

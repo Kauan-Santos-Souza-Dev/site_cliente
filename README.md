@@ -122,7 +122,8 @@ Depois: `python manage.py migrate`, `python manage.py carregar_exemplos`, `pytho
 | `EMAIL_BACKEND` | Vazio = e-mails só no terminal (desenvolvimento). Produção: SMTP do Brevo (a configurar) |
 | `DEFAULT_FROM_EMAIL` | Remetente dos e-mails (vazio = `Elegância Cristã <nao-responder@localhost>`) |
 | `MERCADOPAGO_ACCESS_TOKEN` | Access Token do Mercado Pago (**de teste** no desenvolvimento). Vazio = pagamento online desligado |
-| `MERCADOPAGO_WEBHOOK_SECRET` | Assinatura secreta do webhook, gerada no painel do Mercado Pago (v2 Etapa 7b) |
+| `MERCADOPAGO_WEBHOOK_SECRET` | Assinatura secreta do webhook (painel do Mercado Pago → Webhooks → modo Teste → evento "Order"). Vazia = o webhook responde 503 e não processa nada. Teste e produção têm chaves **diferentes** (v2 Etapa 7b) |
+| `CSRF_TRUSTED_ORIGINS` | Opcional. Só ao abrir o site por um túnel (cloudflared, ngrok) para testar o webhook: o endereço do túnel **com** `https://`. Vazio = nenhuma origem extra |
 | `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME` | **Só no sandbox:** `APRO` faz o Pix de teste ser aprovado sozinho. Em produção, **vazio** |
 
 ## Estrutura de pastas
@@ -170,9 +171,12 @@ PROJETO/
 ├── pagamentos/      # (v2) pagamento pelo Mercado Pago
 │   ├── models.py      # Payment: IDs do gateway, situação, valor, prazo e "copia e cola" (sem dado pessoal)
 │   ├── gateway.py     # ÚNICO arquivo que usa o SDK do Mercado Pago (simulado nos testes)
-│   ├── pix.py         # start_pix_payment: cria/reaproveita o Pix e alinha os prazos
-│   ├── views.py       # Pagar com Pix, página do QR Code e situação em JSON
-│   └── admin.py       # lista de pagamentos, só consulta
+│   ├── pix.py         # start_pix_payment (cria/reaproveita o Pix) e cancel_pix_charge (cancela no gateway)
+│   ├── webhook.py     # regra do webhook: reconsulta, confere valor, idempotência, pagamento tardio
+│   ├── views.py       # Pagar com Pix, página do QR Code, situação em JSON e o webhook
+│   ├── admin.py       # lista de pagamentos, só consulta, com aviso de "pago após expirar"/"divergente"
+│   ├── tests.py       # Pix, página do QR e aviso do admin
+│   └── test_webhook.py # webhook: assinatura, reconsulta, idempotência, tardio, cancelamento
 ├── templates/
 │   ├── base.html      # cabeçalho, menu e rodapé de todas as páginas
 │   ├── 404.html       # página "não encontrada" (com DEBUG=False)
@@ -640,7 +644,7 @@ A página do produto (`loja/views.py::product_detail`) usa as mesmas duas funç�
 ### Pagamento com Pix (app `pagamentos/`) — v2 etapa 7a
 A cliente gera um Pix com **QR Code dinâmico** e "copia e cola" no detalhe do pedido (decisões 100 a 105). É uma
 cobrança **imediata** do Mercado Pago (Orders API), **não** o "Pix Automático" de cobranças recorrentes.
-**Nesta parte (7a) o pedido ainda não vira "pago"**: quem confirma é o webhook, na Etapa 7b.
+**Nesta parte (7a) o pedido ainda não vira "pago"**: quem confirma é o webhook, na Etapa 7b (seção seguinte).
 
 **Regras principais:**
 - Só o arquivo `pagamentos/gateway.py` fala com o Mercado Pago (SDK oficial `mercadopago` 3.6.0). Nos testes ele é simulado.
@@ -678,7 +682,83 @@ POST /pagamentos/pedido/<id>/pix/gerar/ → config/urls.py → pagamentos/urls.p
 4. Faça um pedido → detalhe do pedido → **"Pagar com Pix"** → a página mostra o QR e o "copia e cola".
 5. Confira no painel do Mercado Pago (modo Teste → pagamentos de teste) e no admin (**Pagamentos**). Se o Mercado Pago
    recusar, o terminal do `runserver` mostra só `"criar Pix" recusado (HTTP 4xx)`.
-6. O pedido continua "aguardando pagamento" até a Etapa 7b (webhook).
+6. Sem o webhook configurado, o pedido continua "aguardando pagamento". Para ele virar "pago", siga a seção da 7b abaixo.
+
+### Webhook do Pix: confirmação, pagamento tardio e cancelamento (app `pagamentos/`) — v2 etapa 7b
+Quando a cliente paga, o **Mercado Pago avisa o site** (webhook) e o pedido vira "pago" sozinho (decisões 106 a 109).
+O aviso é só uma "campainha": o site **pergunta de novo ao Mercado Pago** o que aconteceu, com o próprio token,
+e só então muda o pedido.
+
+| Endereço | View | O que faz |
+|---|---|---|
+| `/pagamentos/webhook/mercadopago/` | `mercadopago_webhook` | **Só POST, sem login e sem CSRF** (protegido pela assinatura). Recebe o aviso do Mercado Pago |
+
+**Regras principais:**
+- **Assinatura:** o cabeçalho `x-signature` é conferido com a chave `MERCADOPAGO_WEBHOOK_SECRET` pelo validador oficial do
+  SDK. Errada ou ausente: **401** e nada acontece. Se falhar com o ID como chegou, tenta com ele em minúsculas (decisão 106).
+- **Reconsulta:** o corpo do aviso é ignorado; vale o que `GET /v1/orders/{id}` responde. "Pago" = `processed` + `accredited`.
+- **Conferência (em `Decimal`):** ID da order, `external_reference` (`pagamento-<id>`), valor total, valor pago e total do
+  pedido precisam bater. Senão, o pagamento fica **"Valor divergente (conferir)"** e o pedido **não** vira pago.
+- **Idempotência:** o mesmo aviso pode chegar várias vezes. Com trava no banco, só o primeiro confirma; os outros saem
+  como "repetido" (resposta 200, nada muda).
+- **Respostas:** 401 (assinatura), 200 (aceito, repetido, order desconhecida ou aviso de outro tipo), 503 (problema
+  nosso ou Mercado Pago fora do ar: ele reenvia depois).
+- **Pago depois de expirar ou cancelar (opção B, decisão 108):** o pedido **não** volta. O pagamento fica
+  **"Pago após expirar (decidir)"**, o admin mostra um aviso e a dona decide, com a cliente, se entrega ou estorna.
+  Na página do Pix, a cliente vê: "Recebemos seu pagamento depois do prazo. A loja vai entrar em contato."
+- **Cancelar o pedido cancela o Pix no Mercado Pago** (decisão 109), depois do cancelamento local e sem desfazê-lo se o
+  gateway falhar. A **expiração** continua só local (o Pix vence sozinho no mesmo instante).
+
+**Caminho do aviso do Mercado Pago (POST):**
+```
+POST /pagamentos/webhook/mercadopago/?data.id=ORD01...&type=order     (cabeçalhos x-signature e x-request-id)
+  → config/urls.py → pagamentos/urls.py → pagamentos/views.py::mercadopago_webhook  (@csrf_exempt, @require_POST)
+  → chave e token no .env?                                    não → 503
+  → gateway.is_webhook_signature_valid(x-signature, x-request-id, data.id)
+       → SDK WebhookSignatureValidator (HMAC-SHA256)          inválida → 401
+  → type é "order"/"orders"?                                  não → 200 (não é conosco)
+  → pagamentos/webhook.py::process_order_notification(data.id)
+       1. Payment.objects.filter(gateway_order_id=data.id)     não achou → 200 ("desconhecida")
+       2. gateway.get_order(data.id)  (sem trava)              GET /v1/orders/{id}; fora do ar → 503
+       3. apply_gateway_order, em transaction.atomic():
+            select_for_update no Order e depois no Payment
+            Payment já final?                     → "repetido"
+            não pago?                             → só atualiza o espelho (ou cancelado/expirado)
+            valor/referência não batem?           → Payment "divergente"
+            pedido aguardando                     → Order "pago" (Order.save valida a transição) + Payment "aprovado"
+            pedido expirado/cancelado             → Payment "pago após expirar" (pedido não muda)
+  → 200 (resposta vazia)
+Depois: a página do Pix (main.js, a cada 5 s) lê pix_status → vê "pago" → recarrega → templates/pagamentos/pix.html
+```
+
+**Como a dona fica sabendo de um caso para decidir:** **Admin → Pagamentos** mostra um aviso amarelo no topo enquanto
+houver pagamento "Pago após expirar" ou "Valor divergente" (com a contagem). Use o filtro "situação" para achá-los.
+Ainda **não** há aviso por e-mail ou WhatsApp: fica para quando o Brevo for configurado (pendência na decisão 108).
+Hoje o aviso só some quando o pagamento sair dessas situações (o estorno pelo admin chega na Etapa 8).
+
+**O que configurar à mão para testar no sandbox:**
+1. **Túnel:** o Mercado Pago precisa alcançar o seu `runserver` pela internet. Use um túnel, por exemplo
+   `cloudflared tunnel --url http://localhost:8000` (Cloudflare) ou `ngrok http 8000`. Ele mostra um endereço
+   `https://...` que muda a cada vez que o túnel é aberto.
+2. **Host no `.env`:** ponha o host do túnel em `ALLOWED_HOSTS` (sem `https://`) e, se for navegar pelo endereço do túnel,
+   também em `CSRF_TRUSTED_ORIGINS` (com `https://`). Reinicie o `runserver`.
+   ```
+   ALLOWED_HOSTS=localhost,127.0.0.1,abc-123.trycloudflare.com
+   CSRF_TRUSTED_ORIGINS=https://abc-123.trycloudflare.com
+   ```
+3. **Painel do Mercado Pago** ([Suas integrações](https://www.mercadopago.com.br/developers/panel/app)) → sua aplicação →
+   **Webhooks** → **modo Teste**: URL `https://<host-do-túnel>/pagamentos/webhook/mercadopago/` e evento **"Order"**. Salve.
+4. **Chave no `.env`:** copie a **assinatura secreta** que o painel mostra para `MERCADOPAGO_WEBHOOK_SECRET` e reinicie o `runserver`.
+5. Com `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME=APRO`, gere um Pix: o Mercado Pago aprova sozinho, avisa o site e a página
+   do Pix muda para "Pagamento confirmado". No terminal aparece `Webhook: pedido N, pagamento M, resultado "pago".`
+6. **Pendente (decisão 106):** confirmar se o Mercado Pago assina o ID como ele chega ou em minúsculas. O log atual
+   não diz qual das duas tentativas bateu; um jeito de descobrir é desligar uma delas temporariamente e repetir o teste.
+7. Se aparecer `Webhook recusado: assinatura inválida`, confira a chave (a de **teste**, não a de produção) e se a URL do
+   painel é a do túnel **atual**.
+
+**Testes:** `python manage.py test pagamentos` (webhook em `pagamentos/test_webhook.py`; aviso do admin e mensagem de
+pagamento tardio em `pagamentos/tests.py`). O Mercado Pago é sempre simulado; a assinatura é calculada de verdade
+com uma chave falsa.
 
 ## Dados pessoais que o site guarda (LGPD)
 Inventário real, por tabela e campo. A Política de Privacidade e a exclusão de conta se baseiam nele:
@@ -711,7 +791,8 @@ Ou só os de um app: `python manage.py test pedidos`.
 | `loja/tests.py` | Models do catálogo, validação de upload, páginas, API (só leitura, sem estoque exato), admin exige login |
 | `carrinho/tests.py` | Adicionar, somar, limite de estoque, alterar quantidade, remover, total, produto desativado, sessão só quando necessário |
 | `pedidos/tests.py` | Checkout cria pedido da conta e itens, preço guardado, estoque descontado, limite por IP, CSRF. **v2 Etapa 5:** prazo da reserva, frete por UF, grátis no limite, UF sem frete, frete congelado; todas as transições da tabela (`subTest`), estoque devolvido uma vez só; expiração (comando, `--dry-run`, idempotência, corrida com o pagamento, páginas que expiram); Meus pedidos (só os da conta, 404 para outra conta/sem dona/inexistente, login); pedido ativo; link do WhatsApp sem dado pessoal; admin (status só leitura, sem "pago", ações, exclusão, frete provisório, configuração única). **v2 Etapa 5b:** transições com "entregue"; pedido ativo a contar da entrega; cancelamento pela cliente (só POST, login, 404 para outra conta, só aguardando, clique duplo, pedido vencido); ações "entregue" e "Devolver peças ao estoque" (uma vez só, histórico, só estorno de enviado). Não provam concorrência real (ver decisão 97). **v2 Etapa 6:** parcelas (limite, parcela mínima, soma exata dos centavos em 1x a 12x, `Decimal`, política "cliente paga"); menor limite do carrinho; produto com limite maior que o geral em compra pequena (a parcela mínima vence); páginas do produto e do checkout (estimativa, nunca "sem juros"); admin (edição em lista recusa 0 e 13, ação "voltar à regra geral", grupo "Loja") |
-| `pagamentos/tests.py` | **v2 Etapa 7a** (Mercado Pago simulado): corpo do Pix (valor em texto, `PT30M`, só e-mail, sem CPF, `APRO` só se configurado, `float` recusado); erro e falha de rede viram mensagem genérica e log sem token/e-mail; gerar Pix (prazo da cobrança igual ao da reserva, QR persistido, configuração da loja, reaproveita no 2º clique, mesma chave de idempotência após falha); 404 para outra conta, pedido da v1 e inexistente; não gera Pix para pedido cancelado, expirado ou vencido; só POST; login; sem token = indisponível; nunca marca "pago"; página do QR e situação em JSON (só lê o banco, `never_cache`, 404 para outra conta); reserva mínima de 30 min |
+| `pagamentos/tests.py` | **v2 Etapa 7a** (Mercado Pago simulado): corpo do Pix (valor em texto, `PT30M`, só e-mail, sem CPF, `APRO` só se configurado, `float` recusado); erro e falha de rede viram mensagem genérica e log sem token/e-mail; gerar Pix (prazo da cobrança igual ao da reserva, QR persistido, configuração da loja, reaproveita no 2º clique, mesma chave de idempotência após falha); 404 para outra conta, pedido da v1 e inexistente; não gera Pix para pedido cancelado, expirado ou vencido; só POST; login; sem token = indisponível; nunca marca "pago"; página do QR e situação em JSON (só lê o banco, `never_cache`, 404 para outra conta); reserva mínima de 30 min. **v2 Etapa 7b:** mensagem de pagamento tardio na página do Pix (pedido expirado e cancelado, sem QR, 404 para outra conta); aviso no admin de pagamentos ("Pago após expirar" e "Valor divergente", contagem, some sem casos) |
+| `pagamentos/test_webhook.py` | **v2 Etapa 7b** (Mercado Pago simulado, assinatura HMAC calculada de verdade com chave falsa): assinatura inválida, ausente, malformada, de outro ID ou `x-request-id` (401), ID em minúsculas, sem chave (503), só POST, sem login/CSRF, tipo de aviso e order desconhecidos (200 sem consultar), gateway fora do ar (503), corpo ignorado, log sem segredos; pago, repetido (idempotência), valores e referência divergentes, pendente, cancelado/expirado no gateway, reembolso parcial não é pago, reserva definitiva, pagamento tardio (expirado e cancelado); cancelamento do Pix ao cancelar o pedido (falha do gateway não desfaz); chamadas reais do SDK com HTTP simulado; dois avisos simultâneos confirmam uma vez só |
 | `contas/tests.py` | Senha em Argon2, e-mail em minúsculas, cadastro com resposta idêntica (novo, verificado, não verificado), pré-sequestro, limite de e-mails, link de verificação (válido, adulterado, vencido, e-mail trocado), checkout só verificado, login sem enumeração, bloqueio do axes (5 erros, mesmo texto, maiúsculas, outro IP, 15 min, admin), esqueci a senha, 2FA (app, backup de uso único, comando), grupo "Loja", carrinho do cadastro ao login. **LGPD (v2 Etapa 4):** caixa de aceite desmarcada e obrigatória, versão e data gravadas, Minha conta só com login e só da própria conta, troca de e-mail (senha, link único, vencido, adulterado, e-mail ocupado sem enumeração), exportação JSON sem hash, exclusão (anonimiza, derruba outras sessões, limpa axes e histórico do admin, staff não exclui), comando de limpeza (prazos e `--dry-run` sem dado pessoal), páginas legais, aviso de cookies e nenhum histórico de login. **v2 Etapa 5:** exclusão bloqueada com pedido ativo (GET e POST), liberada com pedidos encerrados; exportação com os próprios pedidos; ação "Anonimizar" (confirmação, pula equipe e pedido ativo, grupo "Loja" sem acesso); limpeza não apaga conta com pedido |
 
 ## Segurança
@@ -736,6 +817,11 @@ Ou só os de um app: `python manage.py test pedidos`.
 | Pix: nenhuma tela marca "pago"; a página só lê a situação no nosso banco | `pagamentos/views.py::pix_status` |
 | Pix: sem cobrança duplicada (chave de idempotência gravada antes da chamada) e sem trava do banco durante a rede | `pagamentos/pix.py` |
 | Pix: sem CPF; vai ao gateway só o e-mail e o valor | `pagamentos/gateway.py::build_pix_order_body` |
+| Webhook: assinatura HMAC conferida pelo validador do SDK (aviso forjado = 401); única rota POST sem CSRF | `pagamentos/gateway.py::is_webhook_signature_valid`, `pagamentos/views.py::mercadopago_webhook` |
+| Webhook: "pago" só depois de reconsultar o Mercado Pago com o nosso token; corpo do aviso ignorado | `pagamentos/webhook.py::process_order_notification` |
+| Webhook: valor pago, valor da order e total do pedido conferidos em `Decimal`, mais ID e `external_reference` | `pagamentos/webhook.py::_matches_our_payment` |
+| Webhook: idempotente (aviso repetido ou simultâneo confirma uma vez só, com trava no banco) | `pagamentos/webhook.py::apply_gateway_order` |
+| Pagamento tardio não reativa o pedido (não vende a mesma peça duas vezes); a dona decide | `pagamentos/webhook.py::_mark_late`, `pagamentos/admin.py` |
 | LGPD: só os dados necessários, aviso no checkout, Política e Termos (rascunhos versionados) | `templates/pedidos/checkout.html`, `templates/loja/privacy.html`, `templates/loja/terms.html` |
 | Aceite registrado (versão + data/hora), caixa desmarcada | `contas/models.py::Consent`, `contas/views.py::record_consent` |
 | Minha conta sem id na URL: só a própria conta (contra IDOR) | `contas/views.py`, `contas/urls.py` |
@@ -765,7 +851,9 @@ Ou só os de um app: `python manage.py test pedidos`.
 - [ ] **Agendar** `python manage.py expirar_pedidos` a cada 5 minutos (decisão 88). Sem ele, a reserva vencida só é liberada quando alguém abre o produto, o carrinho, o checkout ou "Meus pedidos".
 - [ ] Backup do banco (`mysqldump`) antes de cada `migrate` em produção.
 - [ ] **Parcelamento:** a "política de juros" do admin (Configuração da loja) é igual à configurada na **conta do Mercado Pago**; se for "a cliente paga", a **revisão jurídica** cobre a informação sobre juros (CDC, art. 52); na Etapa 8, o limite de parcelas é calculado no servidor e congelado no pedido, nunca vindo do navegador (decisão 99).
-- [ ] **Mercado Pago (v2 Etapa 7):** trocar o Access Token de teste pelo de **produção**; configurar o webhook de **produção** no painel (URL do site) e pôr a nova assinatura secreta no `.env`; deixar `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME` **vazio**; fazer um Pix real de valor baixo e estornar.
+- [ ] **Mercado Pago (v2 Etapa 7):** trocar o Access Token de teste pelo de **produção**; deixar `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME` **vazio**; fazer um Pix real de valor baixo e estornar.
+- [ ] **Webhook do Mercado Pago (v2 Etapa 7b):** no painel, **modo Produção**, URL `https://<domínio-da-loja>/pagamentos/webhook/mercadopago/` com o evento **"Order"**; copiar a **assinatura secreta de produção** (é diferente da de teste) para `MERCADOPAGO_WEBHOOK_SECRET`; tirar do `.env` os hosts de túnel (`ALLOWED_HOSTS` e `CSRF_TRUSTED_ORIGINS`); conferir no Pix real que o pedido vira "pago" sozinho; o site precisa estar em **HTTPS**.
+- [ ] **Aviso à dona por e-mail ou WhatsApp** quando houver "Pago após expirar" ou "Valor divergente" (decisão 108), junto com a configuração do Brevo. Até lá, ela precisa abrir **Admin → Pagamentos** com frequência.
 - [ ] Banco com usuário **dedicado** (nunca `root`) e senha forte, diferente da de desenvolvimento (decisão 70).
 - [ ] **E-mail de verdade:** configurar o SMTP do Brevo (`EMAIL_BACKEND` e credenciais no `.env`) e um `DEFAULT_FROM_EMAIL` de um domínio da loja. Com o backend de console, ninguém recebe o link de verificação nem o de nova senha.
 - [ ] Criar a conta da dona com `createsuperuser` (login por e-mail) e **senha forte**, rodar `configurar_2fa` e guardar os códigos de backup; rodar `criar_grupos`.
@@ -816,6 +904,8 @@ Decisões de negócio que só a dona pode tomar (algumas com orientação juríd
 11. **Exclusão de conta:** bloquear por 30 dias depois da **entrega** (etapa 5b) está aprovado como padrão (a dona pode mudar). Quem marca "entregue" é a dona, no admin.
 12. ~~Cancelamento pela cliente~~ e ~~status "entregue"~~: feitos na etapa 5b. Aprovados como padrão; a dona pode mudar.
 13. **Antes de ter clientes reais:** a Política não tem reaceite (decisão 95). Decidir como avisar as clientes quando o texto mudar.
+14. **Pix pago depois do prazo (v2 Etapa 7b, decisão 108):** o pedido não volta sozinho; a dona decide caso a caso se
+    entrega (se ainda houver a peça) ou estorna. Confirmar com a dona e definir como ela prefere ser avisada (e-mail ou WhatsApp).
 
 ## Roteiro da v2
 O escopo e as etapas da v2 estão no [CLAUDE.md](CLAUDE.md#etapas-do-roteiro-da-v2). Cada etapa concluída ganha

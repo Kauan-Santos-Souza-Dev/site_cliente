@@ -55,6 +55,18 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# Endereços (com https://) que podem enviar formulários POST ao site, além do
+# próprio. Só é preciso ao abrir o site por um TÚNEL (cloudflared, ngrok) para
+# testar o webhook no sandbox: o CSRF do Django compara a origem do
+# formulário com o endereço do site e recusaria a do túnel. O webhook em si
+# não precisa disso (ele é @csrf_exempt e protegido pela assinatura).
+# Vazio = nenhuma origem extra (o padrão do Django).
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
 # HTTPS (produção). Por padrão, liga sozinho quando DEBUG=False, para não
 # depender de alguém lembrar. Para testar localmente com DEBUG=False (ex.:
 # ver a página 404), use SECURE_HTTPS=False no .env, pois o runserver não
@@ -366,7 +378,13 @@ STORE_ADDRESS = os.environ.get('STORE_ADDRESS', '').strip()
 # Comece SEMPRE com as credenciais de TESTE (sandbox). Sem Access Token, o
 # botão "Pagar com Pix" some e o site avisa que o pagamento está indisponível.
 MERCADOPAGO_ACCESS_TOKEN = os.environ.get('MERCADOPAGO_ACCESS_TOKEN', '').strip()
-# Assinatura secreta do webhook, gerada no painel do Mercado Pago (v2 Etapa 7b).
+# Assinatura secreta do webhook (v2 Etapa 7b, decisão 106). Onde gerar:
+# painel do Mercado Pago (Suas integrações) -> sua aplicação -> Webhooks ->
+# modo Teste -> URL do site + evento "Order" -> Salvar -> a "assinatura
+# secreta" aparece na mesma tela (os nomes dos botões podem mudar no painel).
+# É com ela que o site confere o HMAC do cabeçalho x-signature de cada aviso.
+# Vazia = o webhook responde 503 e não processa nada (o Mercado Pago tenta
+# de novo depois). Teste e produção têm assinaturas DIFERENTES.
 MERCADOPAGO_WEBHOOK_SECRET = os.environ.get('MERCADOPAGO_WEBHOOK_SECRET', '').strip()
 # SÓ NO SANDBOX: com "APRO", o Mercado Pago aprova o Pix de teste sozinho.
 # Em produção fica VAZIO (aí o site não manda nome nenhum ao gateway).

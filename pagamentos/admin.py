@@ -5,7 +5,7 @@ uma cobrança é o próprio site, conversando com o Mercado Pago. Assim, um
 clique por engano nunca vira "pago" nem some com um registro financeiro.
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from pedidos.whatsapp import format_brl
 
@@ -33,6 +33,36 @@ class PaymentAdmin(admin.ModelAdmin):
     @admin.display(description='valor')
     def amount_display(self, payment):
         return format_brl(payment.amount)
+
+    def changelist_view(self, request, extra_context=None):
+        """Mostra um aviso no topo enquanto houver cobrança que pede decisão da dona.
+
+        Mesmo padrão do aviso de frete provisório (pedidos/admin.py,
+        ShippingRateAdmin). Os dois casos vêm do webhook (decisões 107 e 108):
+        - "Pago após expirar": dinheiro recebido para um pedido que já tinha
+          expirado ou sido cancelado. A dona decide se entrega ou estorna.
+        - "Valor divergente": o Mercado Pago diz que foi pago, mas o valor ou
+          a referência não batem com o pedido. O pedido NÃO virou "pago".
+        O aviso some sozinho quando não houver mais nenhum desses casos.
+        """
+        late = Payment.objects.filter(status=Payment.Status.LATE_PAID).count()
+        divergent = Payment.objects.filter(status=Payment.Status.DIVERGENT).count()
+        if late:
+            self.message_user(
+                request,
+                f'{late} pagamento(s) "Pago após expirar": o dinheiro chegou depois que o pedido '
+                'expirou ou foi cancelado. Decida com a cliente se entrega (se ainda houver a peça) '
+                'ou estorna. Use o filtro "situação" para encontrá-los.',
+                messages.WARNING,
+            )
+        if divergent:
+            self.message_user(
+                request,
+                f'{divergent} pagamento(s) com "Valor divergente": o valor pago não bate com o pedido. '
+                'Confira no painel do Mercado Pago antes de qualquer envio. Use o filtro "situação".',
+                messages.WARNING,
+            )
+        return super().changelist_view(request, extra_context)
 
     def has_add_permission(self, request):
         return False

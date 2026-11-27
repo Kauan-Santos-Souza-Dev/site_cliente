@@ -21,6 +21,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from pedidos.models import Order
 from pedidos.reservations import expire_overdue_orders
 
 from . import gateway
@@ -90,8 +91,22 @@ def pix_page(request, pk):
         'qr_data_uri': f'data:image/png;base64,{payment.qr_code_base64}' if payment.qr_code_base64 else '',
         # O QR só aparece enquanto o pedido aguarda pagamento.
         'qr_svg': make_qr_svg(payment.pix_code) if order.is_awaiting_payment else '',
+        'late_paid': is_late_paid(order, payment),
     }
     return render(request, 'pagamentos/pix.html', context)
+
+
+def is_late_paid(order, payment):
+    """True se o Pix foi pago DEPOIS de o pedido expirar ou ser cancelado (decisão 108).
+
+    A conta fica aqui, e não no template, porque o {% if %} do Django não
+    aceita parênteses e a condição ficaria confusa de ler. A página só
+    LÊ a situação gravada pelo webhook: nada é confirmado por ela.
+    """
+    return (
+        payment.status == Payment.Status.LATE_PAID
+        and order.status in (Order.Status.EXPIRED, Order.Status.CANCELLED)
+    )
 
 
 @login_required
