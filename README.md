@@ -734,7 +734,8 @@ Depois: a página do Pix (main.js, a cada 5 s) lê pix_status → vê "pago" →
 **Como a dona fica sabendo de um caso para decidir:** **Admin → Pagamentos** mostra um aviso amarelo no topo enquanto
 houver pagamento "Pago após expirar" ou "Valor divergente" (com a contagem). Use o filtro "situação" para achá-los.
 Ainda **não** há aviso por e-mail ou WhatsApp: fica para quando o Brevo for configurado (pendência na decisão 108).
-Hoje o aviso só some quando o pagamento sair dessas situações (o estorno pelo admin chega na Etapa 8).
+Hoje o aviso só some quando o pagamento sair dessas situações. A ação para a dona resolver o caso (entregue ou
+estornado, com observação e data) é pendência da decisão 108.
 
 **O que configurar à mão para testar no sandbox:**
 1. **Túnel:** o Mercado Pago precisa alcançar o seu `runserver` pela internet. Use um túnel, por exemplo
@@ -751,8 +752,9 @@ Hoje o aviso só some quando o pagamento sair dessas situações (o estorno pelo
 4. **Chave no `.env`:** copie a **assinatura secreta** que o painel mostra para `MERCADOPAGO_WEBHOOK_SECRET` e reinicie o `runserver`.
 5. Com `MERCADOPAGO_SANDBOX_PAYER_FIRST_NAME=APRO`, gere um Pix: o Mercado Pago aprova sozinho, avisa o site e a página
    do Pix muda para "Pagamento confirmado". No terminal aparece `Webhook: pedido N, pagamento M, resultado "pago".`
-6. **Pendente (decisão 106):** confirmar se o Mercado Pago assina o ID como ele chega ou em minúsculas. O log atual
-   não diz qual das duas tentativas bateu; um jeito de descobrir é desligar uma delas temporariamente e repetir o teste.
+6. **Pendente (decisão 106):** descobrir se o Mercado Pago assina o ID como ele chega ou em minúsculas. Um **log temporário**
+   mostra no terminal `Webhook: assinatura conferida com o ID original` (ou `... ID minúscula`). Anote o resultado na
+   decisão 106 e depois remova a tentativa que não bateu, o log e o teste dele.
 7. Se aparecer `Webhook recusado: assinatura inválida`, confira a chave (a de **teste**, não a de produção) e se a URL do
    painel é a do túnel **atual**.
 

@@ -187,6 +187,27 @@ class WebhookSignatureTest(WebhookTestMixin, TestCase):
         self.refresh()
         self.assertEqual(self.order.status, S.PAID)
 
+    def test_log_temporario_diz_qual_tentativa_bateu(self):
+        """Decisão 106: o log diz só "original" ou "minúscula" (sem ID, chave ou assinatura).
+
+        Este teste sai junto com o log temporário, depois do teste no sandbox.
+        """
+        cases = [(sign(ORDER_ID), 'ID original'), (sign(ORDER_ID.lower()), 'ID minúscula')]
+        for signature, expected in cases:
+            with self.subTest(expected=expected):
+                with mock.patch(GET_ORDER, return_value=gateway_order(self.payment)):
+                    with self.assertLogs('pagamentos', 'INFO') as logs:
+                        self.notify(signature=signature)
+                text = ' '.join(logs.output)
+                self.assertIn(f'assinatura conferida com o {expected}', text)
+                for secret in (FAKE_SECRET, ORDER_ID, ORDER_ID.lower(), signature):
+                    self.assertNotIn(secret, text)
+
+    def test_assinatura_recusada_nao_gera_log_de_acerto(self):
+        with self.assertLogs('pagamentos', 'INFO') as logs:
+            self.notify(signature=sign(ORDER_ID, secret='chave-errada'))
+        self.assertNotIn('assinatura conferida', ' '.join(logs.output))
+
     @override_settings(MERCADOPAGO_WEBHOOK_SECRET='')
     def test_sem_chave_no_env_da_503_e_nao_processa(self):
         """Problema de configuração NOSSO: 503 faz o Mercado Pago tentar de novo depois."""

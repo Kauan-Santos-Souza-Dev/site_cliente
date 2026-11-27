@@ -283,16 +283,23 @@ def is_webhook_signature_valid(x_signature, x_request_id, data_id):
     tentativas exigem a chave secreta, então a segurança é a mesma
     (decisão 106; confirmar no sandbox qual das duas é a usada).
 
-    Log: só o MOTIVO da recusa (ex.: "SignatureMismatch"). Nunca a chave,
-    os cabeçalhos ou a assinatura.
+    Log: só o MOTIVO da recusa (ex.: "SignatureMismatch") e, no acerto,
+    QUAL tentativa bateu ("original" ou "minúscula"). Nunca a chave, os
+    cabeçalhos, a assinatura ou o próprio ID.
     """
     secret = settings.MERCADOPAGO_WEBHOOK_SECRET
     if not secret:
         return False
+    attempt = 'original'
     reason = _signature_matches(x_signature, x_request_id, data_id, secret)
     if reason is not None and data_id and data_id != data_id.lower():
+        attempt = 'minúscula'
         reason = _signature_matches(x_signature, x_request_id, data_id.lower(), secret)
     if reason is not None:
         logger.warning('Webhook recusado: assinatura inválida (%s).', reason)
         return False
+    # LOG TEMPORÁRIO (decisão 106): serve só para descobrir, no teste do
+    # sandbox, qual das duas tentativas o Mercado Pago usa. Depois do teste,
+    # remova a tentativa que não bateu E esta linha.
+    logger.info('Webhook: assinatura conferida com o ID %s (log temporário, decisão 106).', attempt)
     return True
