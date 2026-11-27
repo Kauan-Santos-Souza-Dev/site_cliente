@@ -39,7 +39,7 @@ def fake_charge(**changes):
     data = {
         'id': 'ORD01TESTE', 'status': 'action_required', 'status_detail': 'waiting_transfer',
         'external_reference': 'pagamento-1', 'total_amount': Decimal('169.90'),
-        'payment_id': 'PAY01TESTE', 'pix_code': FAKE_PIX_CODE,
+        'total_paid_amount': None, 'payment_id': 'PAY01TESTE', 'pix_code': FAKE_PIX_CODE,
         'qr_code_base64': 'aW1hZ2VtLWRlLXFy',
     }
     data.update(changes)

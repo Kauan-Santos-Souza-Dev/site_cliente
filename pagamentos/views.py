@@ -1,19 +1,24 @@
-"""Views do Pix: gerar a cobrança, mostrar o QR Code e informar a situação (decisão 104).
+"""Views do Pix: gerar a cobrança, mostrar o QR Code, informar a situação (decisão 104)
+e receber o webhook do Mercado Pago (v2 Etapa 7b, decisões 106 e 107).
 
-Segurança comum a todas:
+Segurança comum às views da cliente:
 - @login_required e busca SEMPRE por request.user.orders: pedido de outra
   conta, sem dona (v1) ou inexistente dá 404 (contra IDOR, decisão 91).
 - Nenhuma delas marca o pedido como pago. Quem confirma pagamento é o
   webhook do Mercado Pago, depois de reconsultar a API (v2 Etapa 7b).
 """
 
+import logging
+
 import qrcode
 import qrcode.image.svg
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.conf import settings
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from pedidos.reservations import expire_overdue_orders
@@ -21,6 +26,13 @@ from pedidos.reservations import expire_overdue_orders
 from . import gateway
 from .models import Payment
 from .pix import PixNotAllowed, start_pix_payment
+from .webhook import process_order_notification
+
+logger = logging.getLogger('pagamentos')
+
+# Tipos de aviso que tratamos. A documentação usa "order" numa página e
+# "orders" em outra; aceitamos os dois.
+ORDER_NOTIFICATION_TYPES = {'order', 'orders'}
 
 
 def make_qr_svg(text):
@@ -99,3 +111,55 @@ def pix_status(request, pk):
     expire_overdue_orders(user=request.user)
     order = get_object_or_404(request.user.orders, pk=pk)
     return JsonResponse({'status': order.status})
+
+
+@csrf_exempt
+@require_POST
+def mercadopago_webhook(request):
+    """Recebe o aviso do Mercado Pago de que uma order (Pix) mudou.
+
+    O que é um webhook? Em vez de a loja perguntar ao Mercado Pago "já
+    pagaram?" a cada minuto, o Mercado Pago CHAMA esta URL quando algo muda.
+
+    Por que @csrf_exempt (a ÚNICA rota POST do site sem CSRF)? O token CSRF
+    prova que o formulário saiu de uma página nossa, aberta no navegador da
+    cliente. Quem chama aqui é o servidor do Mercado Pago, que não tem esse
+    token. A proteção no lugar dele é a ASSINATURA (HMAC com a chave secreta)
+    e, depois, a reconsulta à API: mesmo um aviso verdadeiro só serve de
+    "campainha".
+
+    Sem login: o Mercado Pago não tem conta no site. Nenhum dado sai daqui:
+    a resposta é sempre vazia.
+
+    Códigos de resposta:
+    - 401: assinatura inválida/ausente. Nada é processado.
+    - 200: aviso aceito (inclusive order desconhecida ou tipo que não nos
+      interessa: responder erro faria o Mercado Pago reenviar à toa).
+    - 503: problema NOSSO (chave não configurada ou Mercado Pago fora do ar na
+      reconsulta). O Mercado Pago tenta de novo depois (a cada 15 minutos).
+    - 500: erro inesperado (o Django responde sozinho); também gera reenvio.
+
+    O corpo do aviso NÃO é lido: tudo o que importa vem da reconsulta.
+    """
+    if not settings.MERCADOPAGO_WEBHOOK_SECRET or not gateway.is_configured():
+        logger.error('Webhook recebido, mas o Mercado Pago não está configurado no .env.')
+        return HttpResponse(status=503)
+
+    # data.id e type chegam na QUERY STRING (?data.id=ORD...&type=order).
+    data_id = request.GET.get('data.id', '').strip()
+    notification_type = request.GET.get('type', '').strip()
+    signature_ok = data_id and gateway.is_webhook_signature_valid(
+        request.headers.get('x-signature'), request.headers.get('x-request-id'), data_id,
+    )
+    if not signature_ok:
+        return HttpResponse(status=401)
+
+    if notification_type and notification_type not in ORDER_NOTIFICATION_TYPES:
+        return HttpResponse(status=200)  # outro tipo de aviso: não é conosco
+
+    try:
+        process_order_notification(data_id)
+    except gateway.GatewayError:
+        # Não conseguimos confirmar agora: 503 faz o Mercado Pago reenviar.
+        return HttpResponse(status=503)
+    return HttpResponse(status=200)

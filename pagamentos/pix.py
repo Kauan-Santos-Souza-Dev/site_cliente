@@ -28,6 +28,8 @@ logger = logging.getLogger('pagamentos')
 
 # O Mercado Pago não aceita Pix com prazo menor que 30 minutos.
 PIX_MINIMUM_MINUTES = 30
+
+
 class PixNotAllowed(Exception):
     """O pedido não aguarda mais pagamento (pago, expirado, cancelado...)."""
 
@@ -119,3 +121,40 @@ def start_pix_payment(order):
         order.pk, payment.pk, charge.status,
     )
     return payment
+
+
+def cancel_pix_charge(order):
+    """Cancela no Mercado Pago o Pix de um pedido que a cliente acabou de cancelar.
+
+    Chamado DEPOIS do cancelamento local (que já devolveu o estoque). É
+    "melhor esforço": se o Mercado Pago falhar, o pedido continua cancelado
+    e só fica um aviso no log. Se a cliente pagar mesmo assim, o webhook
+    marca "Pago após expirar" para a dona decidir (decisões 108 e 109).
+
+    Devolve True se cancelou no Mercado Pago.
+
+    A chamada de rede fica FORA da transação (não seguramos trava esperando
+    a rede). Depois, com trava, só muda o Payment se ele ainda estiver
+    "pendente": se um webhook de pagamento chegou no meio-tempo, ele vence.
+    """
+    payment = (
+        order.payments
+        .filter(method=Payment.Method.PIX, status=Payment.Status.PENDING)
+        .exclude(gateway_order_id='')
+        .first()
+    )
+    if payment is None:
+        return False  # o Pix nem chegou a ser gerado
+    try:
+        gateway.cancel_order(payment.gateway_order_id)
+    except gateway.GatewayError:
+        logger.warning('Pix do pedido %s não foi cancelado no Mercado Pago.', order.pk)
+        return False
+    with transaction.atomic():
+        Order.objects.select_for_update().get(pk=order.pk)  # mesma ordem de travas do webhook
+        locked = Payment.objects.select_for_update().get(pk=payment.pk)
+        if locked.status == Payment.Status.PENDING:
+            locked.status = Payment.Status.CANCELLED
+            locked.save(update_fields=['status', 'updated_at'])
+    logger.info('Pix do pedido %s cancelado no Mercado Pago.', order.pk)
+    return True

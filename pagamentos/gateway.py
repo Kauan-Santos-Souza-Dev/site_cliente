@@ -18,6 +18,7 @@ Segurança:
 """
 
 import logging
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -28,6 +29,17 @@ logger = logging.getLogger('pagamentos')
 # Tempo máximo (segundos) esperando o Mercado Pago responder. Sem isso, uma
 # lentidão do gateway prenderia a página da cliente por muito tempo.
 REQUEST_TIMEOUT = 20.0
+
+# Tempo máximo das chamadas feitas DENTRO do webhook (consultar a order) e do
+# cancelamento. O Mercado Pago espera a resposta do webhook por até 22 s; com
+# 10 s de consulta, sobra folga para o resto (banco, resposta).
+WEBHOOK_REQUEST_TIMEOUT = 10.0
+
+# Status da order que significam "Pix pago" (documentação "Status da order").
+# Os dois precisam bater: "processed" sozinho também aparece em reembolso
+# parcial (status_detail "partially_refunded").
+PAID_STATUS = 'processed'
+PAID_STATUS_DETAIL = 'accredited'
 
 
 class GatewayError(Exception):
@@ -47,6 +59,8 @@ class GatewayOrder:
     status_detail: str
     external_reference: str
     total_amount: Decimal | None
+    # Quanto o Mercado Pago diz que FOI PAGO (o webhook confere com o pedido).
+    total_paid_amount: Decimal | None
     payment_id: str
     pix_code: str
     qr_code_base64: str
@@ -94,17 +108,22 @@ def _sdk():
     return mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN)
 
 
-def _request_options(idempotency_key):
+def _request_options(idempotency_key=None, timeout=REQUEST_TIMEOUT):
     """Opções da requisição: cabeçalho X-Idempotency-Key e tempo máximo de espera.
 
     Idempotência: mandar a mesma chave de novo NÃO cria uma segunda cobrança;
     o Mercado Pago devolve a primeira. Isso protege contra clique duplo e
     contra a tentativa repetida depois de uma queda de rede.
+
+    Sem idempotency_key, o próprio SDK põe uma chave ALEATÓRIA em cada
+    chamada. Numa consulta (GET) isso não importa: consultar não muda nada.
+    O SDK exige o tempo como float (RequestOptions recusa int).
     """
     from mercadopago.config import RequestOptions
 
-    options = RequestOptions(connection_timeout=REQUEST_TIMEOUT)
-    options.custom_headers = {'x-idempotency-key': str(idempotency_key)}
+    options = RequestOptions(connection_timeout=float(timeout))
+    if idempotency_key is not None:
+        options.custom_headers = {'x-idempotency-key': str(idempotency_key)}
     return options
 
 
@@ -143,6 +162,7 @@ def _to_gateway_order(body):
         status_detail=str(body.get('status_detail') or ''),
         external_reference=str(body.get('external_reference') or ''),
         total_amount=parse_amount(body.get('total_amount')),
+        total_paid_amount=parse_amount(body.get('total_paid_amount')),
         payment_id=str(first_payment.get('id') or ''),
         pix_code=str(payment_method.get('qr_code') or ''),
         qr_code_base64=str(payment_method.get('qr_code_base64') or ''),
@@ -191,3 +211,88 @@ def create_pix_order(*, reference, amount, payer_email, expiration_minutes, idem
     )
     response = _call('criar Pix', sdk.order().create, body, _request_options(idempotency_key))
     return _to_gateway_order(response)
+
+
+def get_order(order_id):
+    """Consulta a order no Mercado Pago (GET /v1/orders/{id}) e devolve um GatewayOrder.
+
+    É a "reconsulta" do webhook: o aviso só diz "algo mudou na order X";
+    O QUE mudou a gente pergunta direto ao Mercado Pago, com o nosso Access
+    Token. Assim, um aviso forjado nunca consegue marcar um pedido como pago.
+
+    Lança GatewayError se o Mercado Pago recusar ou não responder.
+    """
+    sdk = _sdk()
+    options = _request_options(timeout=WEBHOOK_REQUEST_TIMEOUT)
+    response = _call('consultar order', sdk.order().get, str(order_id), options)
+    return _to_gateway_order(response)
+
+
+def cancel_order(order_id):
+    """Cancela a order (o Pix) no Mercado Pago: POST /v1/orders/{id}/cancel.
+
+    Só funciona com a order ainda pendente ("action_required" ou "created",
+    segundo a documentação). Sem corpo; o X-Idempotency-Key é obrigatório.
+
+    Por que uma chave NOVA (uuid4) e não a do Payment? A do Payment já foi
+    usada para CRIAR a order; reusá-la aqui daria erro 409
+    ("idempotency_key_already_used"). Cancelar duas vezes não faz mal: a 2ª
+    só recebe "já cancelada".
+
+    Lança GatewayError se o Mercado Pago recusar ou não responder.
+    """
+    sdk = _sdk()
+    options = _request_options(uuid.uuid4(), timeout=WEBHOOK_REQUEST_TIMEOUT)
+    response = _call('cancelar order', sdk.order().cancel, str(order_id), options)
+    return _to_gateway_order(response)
+
+
+def is_paid(charge):
+    """True se a order do Mercado Pago está paga ("processed" + "accredited")."""
+    return charge.status == PAID_STATUS and charge.status_detail == PAID_STATUS_DETAIL
+
+
+def _signature_matches(x_signature, x_request_id, data_id, secret):
+    """Usa o validador OFICIAL do SDK. Devolve None se confere, ou o motivo da recusa.
+
+    Como funciona a assinatura (HMAC)?
+    O Mercado Pago junta "id:<data.id>;request-id:<x-request-id>;ts:<ts>;"
+    e calcula um HMAC-SHA256 desse texto com a CHAVE SECRETA que só ele e a
+    loja conhecem. O resultado vai no cabeçalho x-signature ("ts=...,v1=...").
+    A loja refaz a conta com a mesma chave: se o resultado bate, o aviso veio
+    de quem conhece a chave. Quem não tem a chave não consegue forjar o v1.
+    O SDK compara em "tempo constante" (hmac.compare_digest), o que impede
+    descobrir a assinatura medindo quanto tempo a comparação demora.
+    """
+    from mercadopago.webhook import InvalidWebhookSignatureError, WebhookSignatureValidator
+
+    try:
+        WebhookSignatureValidator.validate(x_signature, x_request_id, data_id, secret)
+    except InvalidWebhookSignatureError as error:
+        return error.reason.value
+    return None
+
+
+def is_webhook_signature_valid(x_signature, x_request_id, data_id):
+    """Confere se o aviso do webhook foi assinado com a nossa chave secreta.
+
+    Tenta com o data.id exatamente como chegou (é o que o SDK faz). Se falhar
+    e o ID tiver letras maiúsculas, tenta de novo em minúsculas: uma versão
+    da documentação do Mercado Pago manda usar o ID alfanumérico em
+    minúsculas, e os IDs da Orders API são maiúsculos ("ORD01..."). As duas
+    tentativas exigem a chave secreta, então a segurança é a mesma
+    (decisão 106; confirmar no sandbox qual das duas é a usada).
+
+    Log: só o MOTIVO da recusa (ex.: "SignatureMismatch"). Nunca a chave,
+    os cabeçalhos ou a assinatura.
+    """
+    secret = settings.MERCADOPAGO_WEBHOOK_SECRET
+    if not secret:
+        return False
+    reason = _signature_matches(x_signature, x_request_id, data_id, secret)
+    if reason is not None and data_id and data_id != data_id.lower():
+        reason = _signature_matches(x_signature, x_request_id, data_id.lower(), secret)
+    if reason is not None:
+        logger.warning('Webhook recusado: assinatura inválida (%s).', reason)
+        return False
+    return True

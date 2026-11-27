@@ -34,7 +34,11 @@ class Payment(models.Model):
         APPROVED = 'aprovado', 'Aprovado'
         CANCELLED = 'cancelado', 'Cancelado'
         EXPIRED = 'expirado', 'Expirado'
-        # Os quatro abaixo são usados pelo webhook (v2 Etapa 7b).
+        # Pago, mas o pedido já estava expirado/cancelado (estoque já devolvido).
+        # O pedido NÃO é reativado: a dona decide se entrega ou estorna (decisão 108).
+        LATE_PAID = 'pago_apos_expirar', 'Pago após expirar (decidir)'
+        # Os quatro abaixo: DIVERGENT é usado pelo webhook (v2 Etapa 7b); os
+        # de estorno ficam para a Etapa 8.
         DIVERGENT = 'divergente', 'Valor divergente (conferir)'
         REFUND_PENDING = 'estorno_pendente', 'Estorno pendente'
         REFUNDED = 'estornado', 'Estornado'

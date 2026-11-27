@@ -10,6 +10,7 @@ from contas.decorators import verified_email_required
 from loja.models import StoreSettings
 from pagamentos import gateway
 from pagamentos.models import Payment
+from pagamentos.pix import cancel_pix_charge
 
 from .checkout import OutOfStockError, create_order
 from .forms import CheckoutForm
@@ -138,11 +139,16 @@ def cancel_order(request, pk):
       robô poderia cancelar sem querer). O CSRF do Django protege o POST.
     - A busca é pela conta logada (contra IDOR): pedido de outra cliente dá 404.
     - Quem devolve o estoque, com trava, é cancel_order_by_customer.
+    - Se já havia Pix, ele é cancelado também no Mercado Pago (decisão 109),
+      para o QR Code parar de aceitar pagamento. Isso vem DEPOIS e fora da
+      trava: uma falha do gateway não desfaz o cancelamento do pedido.
     """
     # Se o prazo já venceu, o pedido vira "expirado" e a mensagem fica correta.
     expire_overdue_orders(user=request.user)
     order = get_object_or_404(request.user.orders, pk=pk)
     if cancel_order_by_customer(request.user, order.pk):
+        if gateway.is_configured():
+            cancel_pix_charge(order)
         messages.success(request, f'Pedido nº {order.pk} cancelado. As peças voltaram para a loja.')
     else:
         messages.error(request, f'O pedido nº {order.pk} não pode mais ser cancelado.')
